@@ -1,0 +1,63 @@
+name: Mise a jour des prix des carburants
+
+on:
+  schedule:
+    # Toutes les 12 heures (00:00 et 12:00 UTC). GitHub peut retarder legerement
+    # l'execution en cas de forte charge sur l'infrastructure Actions.
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+    inputs:
+      historique_complet_nord:
+        description: "Retelecharger aussi l'historique complet des stations du Nord (plusieurs minutes, sinon prix actuels seulement)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maj-prix
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Mettre a jour la station Esso (Marcq-en-Baroeul)
+        run: python3 track_price.py
+
+      - name: Mettre a jour les stations du departement du Nord
+        env:
+          HISTORIQUE_COMPLET: ${{ github.event.inputs.historique_complet_nord }}
+        run: |
+          cd nord
+          if [ "$HISTORIQUE_COMPLET" = "true" ]; then
+            echo "Import complet demande (archives annuelles + flux instantane)."
+            python3 build_nord.py
+          else
+            echo "Mise a jour rapide (flux instantane seulement)."
+            python3 build_nord.py --maj-seulement
+          fi
+          python3 build_carte.py
+
+      - name: Committer et pousser les changements
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add historique_prix_essence.csv visualisation.html \
+                  nord/stations.csv nord/prix.csv nord/carte_nord.html nord/data
+          if git diff --cached --quiet; then
+            echo "Aucun changement de prix a enregistrer."
+          else
+            git commit -m "Mise a jour automatique des prix ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
