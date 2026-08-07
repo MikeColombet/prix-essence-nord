@@ -1,0 +1,2 @@
+window.NORD_DATA = window.NORD_DATA || {};
+window.NORD_DATA["59440004"] = [{"carburant": "Gazole", "prix_eur": "2.079", "maj_officielle": "2026-08-06 20:01:47"}, {"carburant": "E85", "prix_eur": "0.829", "maj_officielle": "2026-08-06 20:01:47"}, {"carburant": "E10", "prix_eur": "1.889", "maj_officielle": "2026-08-06 20:01:47"}, {"carburant": "SP98", "prix_eur": "2.019", "maj_officielle": "2026-08-06 20:01:47"}];
