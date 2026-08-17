@@ -1,68 +1,85 @@
-# Carte des prix essence – Département du Nord (59)
+# Recherche des prix essence – Hauts-de-France, Normandie, Grand Est, Île-de-France
 
-Carte interactive des stations-service du département du Nord, avec prix
-actuels, comparaison moins chère / plus chère, moyenne départementale par
-carburant et historique par station.
+Site de recherche des stations-service par code postal, avec prix actuels,
+comparaison moins chère / plus chère, moyenne départementale par carburant et
+historique par station. Couvre les 28 départements des régions Hauts-de-France,
+Normandie, Grand Est et Île-de-France (voir la liste dans `config.json`).
 
-La carte est mise à jour automatiquement toutes les 12h par une GitHub
-Action et publiée via GitHub Pages — voir `GITHUB.md` pour la mise en ligne.
+Le site est mis à jour automatiquement toutes les 12h par une GitHub Action
+et publié via GitHub Pages — voir `GITHUB.md` pour la mise en ligne.
 
 Source des données : flux officiel `donnees.roulez-eco.fr` (même source que
 prix-carburants.gouv.fr), mis à jour côté gouvernement toutes les 10 minutes.
 
 ## Fichiers
 
-- `build_nord.py` — récupère les stations du département (filtre sur le code
-  postal) et leur historique de prix, écrit `stations.csv` et `prix.csv`.
-- `build_carte.py` — génère `index.html` à partir de ces deux CSV.
-- `config.json` — paramètres (département, années d'historique à récupérer).
-- `stations.csv` — une ligne par station (adresse, ville, coordonnées).
-- `prix.csv` — une ligne par relevé de prix (station_id, carburant, prix, date).
-- `data/{id}.js` — un petit fichier par station, chargé à la demande par la
-  carte quand tu cliques dessus (pas de serveur nécessaire).
-- `index.html` — la carte interactive (page d'accueil du dépôt / de GitHub Pages).
+- `collect_prices.py` — récupère les stations des départements suivis et
+  leur historique de prix, écrit `stations.csv` et `prix/{dept}.csv`.
+- `build_site.py` — génère `index.html` et les fichiers de données chargés à
+  la demande, à partir de `stations.csv` et `prix/*.csv`.
+- `config.json` — paramètres (départements suivis, années d'historique à récupérer).
+- `stations.csv` — une ligne par station (adresse, ville, code postal, coordonnées).
+- `prix/{dept}.csv` — une ligne par relevé de prix (station_id, carburant, prix,
+  date), un fichier par département.
+- `stations/{dept}.js` — liste des stations d'un département avec leurs prix
+  actuels, chargée à la demande quand tu recherches un code postal.
+- `data/{id}.js` — historique complet des prix d'une station, chargé à la
+  demande quand tu la sélectionnes.
+- `dept_avg/{dept}.js` — moyenne historique d'un département par carburant,
+  chargée à la demande pour la superposer au graphique d'une station.
+- `index.html` — la page de recherche (page d'accueil du dépôt / de GitHub Pages).
 
-Ce format à deux fichiers (au lieu d'un seul CSV plat) évite de répéter
-l'adresse de chaque station à chaque ligne de prix, ce qui réduit sensiblement
-la taille sur le disque.
+Toutes ces données sont chargées à la demande, par département ou par
+station, plutôt que d'un bloc au chargement de la page : avec ~28
+départements suivis, tout embarquer dans `index.html` la rendrait beaucoup
+trop lourde. La page principale ne contient que l'interface de recherche.
+
+Le prix est aussi éclaté en un fichier CSV par département (`prix/{dept}.csv`)
+plutôt qu'un fichier unique : avec plusieurs années d'historique sur ~28
+départements, un fichier unique grossirait au point de risquer de dépasser la
+limite de taille de fichier de GitHub (100 Mo). Un fichier par département
+reste petit indéfiniment.
 
 ## Utilisation
 
 ```bash
 cd ~/DataCarb
-python3 build_nord.py      # 1er lancement : télécharge le flux instantané +
+python3 collect_prices.py  # 1er lancement : télécharge le flux instantané +
                             # les archives 2024, 2025 et l'année en cours
-                            # (toute la France, filtré ensuite sur le 59)
-python3 build_carte.py     # génère/actualise la carte
+                            # (toute la France, filtré ensuite sur les
+                            # départements suivis)
+python3 build_site.py      # génère/actualise le site
 ```
 
-Ouvre ensuite `index.html` dans un navigateur, clique sur une station : ses
-prix actuels et son évolution s'affichent à droite de la carte, avec en
+Ouvre ensuite `index.html` dans un navigateur, tape un code postal (au moins
+les 2 premiers chiffres) pour voir les stations du département, puis clique
+sur une station : ses prix actuels et son évolution s'affichent, avec en
 pointillés la moyenne départementale du même carburant pour comparaison.
 
-À prévoir au premier lancement : `build_nord.py` télécharge 3 archives
+À prévoir au premier lancement : `collect_prices.py` télécharge 3 archives
 annuelles complètes de la France (~10-35 Mo chacune, zip) avant de ne garder
-que les ~250 stations du Nord — l'essentiel du temps est le téléchargement,
-pas l'extraction. Compte 2 à 5 minutes selon ta connexion.
+que les stations des départements suivis — l'essentiel du temps est le
+téléchargement, pas l'extraction. Compte 2 à 5 minutes selon ta connexion.
 
 ## Relancer plus tard
 
-- `python3 build_nord.py --maj-seulement` : ne récupère que les prix actuels
-  (flux instantané, rapide), sans retélécharger les archives annuelles.
-- `python3 build_nord.py` (sans option) : retélécharge aussi les archives
+- `python3 collect_prices.py --maj-seulement` : ne récupère que les prix
+  actuels (flux instantané, rapide), sans retélécharger les archives annuelles.
+- `python3 collect_prices.py` (sans option) : retélécharge aussi les archives
   configurées dans `config.json` — utile en début d'année suivante pour
   ajouter une nouvelle année, ou si tu changes `annees_passees`.
-- Relance `python3 build_carte.py` après chaque mise à jour de `prix.csv` /
-  `stations.csv` pour que la carte reflète les nouvelles données.
+- Relance `python3 build_site.py` après chaque mise à jour de `prix/` /
+  `stations.csv` pour que le site reflète les nouvelles données.
 
 ## Moyenne départementale
 
-La carte affiche, sous les contrôles, la moyenne actuelle de chaque
-carburant sur l'ensemble des stations du département (calculée à partir du
-dernier prix connu de chaque station). Quand tu sélectionnes une station, le
-graphique d'évolution superpose en pointillés la tendance historique de
-cette moyenne départementale (recalculée jour par jour à partir de
-`prix.csv`), pour comparer la station à la tendance générale.
+Quand tu recherches un code postal, le site affiche la moyenne actuelle de
+chaque carburant sur l'ensemble des stations du département correspondant
+(calculée à partir du dernier prix connu de chaque station). Quand tu
+sélectionnes une station, le graphique d'évolution superpose en pointillés
+la tendance historique de cette moyenne départementale (recalculée jour par
+jour à partir de `prix/{dept}.csv`), pour comparer la station à la tendance
+générale.
 
 ## Automatiser la collecte (macOS, optionnel)
 
@@ -80,7 +97,7 @@ crontab -e
 Ajoute cette ligne (mise à jour rapide toutes les 30 minutes) :
 
 ```
-*/30 * * * * /usr/bin/python3 /Users/mikecolombet/DataCarb/build_nord.py --maj-seulement && /usr/bin/python3 /Users/mikecolombet/DataCarb/build_carte.py >> /Users/mikecolombet/DataCarb/log.txt 2>&1
+*/30 * * * * /usr/bin/python3 /Users/mikecolombet/DataCarb/collect_prices.py --maj-seulement && /usr/bin/python3 /Users/mikecolombet/DataCarb/build_site.py >> /Users/mikecolombet/DataCarb/log.txt 2>&1
 ```
 
 Enregistre et quitte (`:wq` si l'éditeur est vim).
@@ -89,14 +106,15 @@ Note macOS : la première fois, le Terminal (ou `cron`) peut demander
 l'autorisation d'accès au dossier `DataCarb` dans Réglages Système >
 Confidentialité et sécurité > Accès complet au disque.
 
-## Étendre à un autre département
+## Ajouter ou retirer un département
 
-Change `"cp_prefix"` dans `config.json` (ex: `"62"` pour le Pas-de-Calais),
-supprime `stations.csv`, `prix.csv` et le contenu de `data/`, puis relance
-`build_nord.py` et `build_carte.py`.
+Édite l'objet `"departements"` dans `config.json` (clé = code département sur
+2 chiffres, valeur = nom affiché). Supprime `stations.csv`, le contenu de
+`prix/`, `data/`, `stations/` et `dept_avg/`, puis relance `collect_prices.py`
+et `build_site.py`.
 
 ## Autres carburants
 
-Le graphique et la carte s'adaptent automatiquement aux carburants
-disponibles dans le département (Gazole, SP95, SP98, E10, E85, GPLc) : rien
-à configurer.
+Le graphique et les résultats de recherche s'adaptent automatiquement aux
+carburants disponibles à chaque station (Gazole, SP95, SP98, E10, E85, GPLc) :
+rien à configurer.

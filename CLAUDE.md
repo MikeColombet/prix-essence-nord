@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A personal fuel-price tracker built from France's official open data feed
-(`donnees.roulez-eco.fr`, same source as prix-carburants.gouv.fr). Two
-independent tools, both pure-stdlib Python 3 (no dependencies to install, no
-`requirements.txt`), each generating a static HTML dashboard that a GitHub
-Action commits and publishes via GitHub Pages every 12 hours:
+A fuel-price search site built from France's official open data feed
+(`donnees.roulez-eco.fr`, same source as prix-carburants.gouv.fr), covering
+every station in 28 départements (Hauts-de-France, Normandie, Grand Est,
+Île-de-France — see `config.json`'s `departements` map for the full list).
+Users search by postal code; there is no map. Two pure-stdlib Python 3
+scripts (no dependencies, no `requirements.txt`) build a static site that a
+GitHub Action regenerates and publishes via GitHub Pages every 12 hours:
 
-- **Root** — tracks a single station (Esso, Marcq-en-Barœul) in depth:
-  `track_price.py` → `historique_prix_essence.csv` → `visualisation.html`.
-- **`nord/`** — tracks every station in a department (default: Nord, 59) on
-  an interactive map: `nord/build_nord.py` → `nord/stations.csv` +
-  `nord/prix.csv` → `nord/build_carte.py` → `nord/carte_nord.html`.
-- `index.html` is a static landing page linking to both dashboards.
+- `collect_prices.py` — fetches/updates `stations.csv` and `prix/{dept}.csv`.
+- `build_site.py` — reads those CSVs and (re)generates `index.html` plus the
+  on-demand JSON/JS data chunks (`stations/{dept}.js`, `data/{id}.js`,
+  `dept_avg/{dept}.js`).
 
 There is no build system, package manager, linter, or test suite — this is
 intentional; treat "no dependencies" as a constraint to preserve, not a gap
@@ -24,79 +24,87 @@ to fill.
 ## Commands
 
 ```bash
-# Single-station tracker (root)
-python3 track_price.py                       # one collection pass; appends to CSV, regenerates visualisation.html
-python3 track_price.py --find 59700           # list stations in a postal code, to find/verify a station_id
-python3 track_price.py --historique 2026      # backfill a year's full price history (2024 2025 2026 for several)
-python3 track_price.py --reparer-prix         # fix old rows stored in pre-2022 "millièmes" price format
-
-# Department-wide map (nord/)
-cd nord
-python3 build_nord.py                # full pass: instant feed + annual archives configured in config.json
-python3 build_nord.py --maj-seulement  # fast pass: instant feed only, no archive re-download
-python3 build_carte.py               # regenerate carte_nord.html from stations.csv/prix.csv (run after build_nord.py)
+python3 collect_prices.py                # full pass: instant feed + annual archives configured in config.json
+python3 collect_prices.py --maj-seulement # fast pass: instant feed only, no archive re-download
+python3 build_site.py                     # regenerate index.html + data chunks (run after collect_prices.py)
 ```
 
-No test/lint/build commands exist. Validate changes by running the relevant
-script and opening the generated `.html` file in a browser.
+No test/lint/build commands exist. Validate changes by running both scripts
+in sequence and opening `index.html` in a browser (type a 2+ digit postal
+code prefix, e.g. `59`, to trigger the on-demand chunk loading path).
 
 ## Architecture notes
 
-**Data source contract.** Both scripts hit the same government endpoints:
+**Data source contract.** `collect_prices.py` hits two government endpoints:
 - instant feed (`/opendata/instantane`): all of France, updated every 10 min.
 - annual archive (`/opendata/annee` or `/opendata/annee/{YEAR}`): all of
   France, a zip containing one large XML, available from 2007.
-The feed never includes a brand/name (e.g. "Esso") — only address, so
-station identity is verified by matching `adresse_attendue` (root) against
-the fetched address, printing a warning (not an error) on mismatch.
+Both are downloaded in full (there's no server-side département filter) and
+filtered client-side to the départements in `config.json`. The feed never
+includes a brand/name — only address — so station identity is address-only.
 
 **Price normalization.** Archives before ~2022 encode price as integer
 millièmes with no decimal separator (`"1126"` → 1.126 €); newer feeds use
-decimal notation directly (`"1.563"`). `normalize_price()` in both
-`track_price.py` and `nord/build_nord.py` detects and converts this — keep
-these two copies in sync if the logic changes. `track_price.py
---reparer-prix` re-normalizes an existing CSV that predates this fix.
+decimal notation directly (`"1.563"`). `normalize_price()` in
+`collect_prices.py` detects and converts this at ingestion time.
 
-**Append-only, dedup-on-write CSVs.** Both pipelines only add a CSV row when
-a station reports a genuinely new price change, deduplicating on
-`(carburant, maj_officielle)` for the root tracker or
-`(station_id, carburant, maj_officielle)` for `nord/`. This keeps history
-files compact under frequent polling and makes reruns idempotent — never
-rewrite these CSVs wholesale except via `stations.csv` (which *is* fully
-rewritten each run, since it's small metadata, not a time series).
+**Why prices are sharded per département (`prix/{dept}.csv`), not one file.**
+At single-département scale a flat `prix.csv` was fine, but at ~28
+départements with multi-year history it would grow toward — and eventually
+past — GitHub's 100MB per-file limit. Each department's CSV instead grows
+only with that département's own station count, indefinitely sustainable.
+`stations.csv` stays a single file (metadata only, small, fully rewritten
+each run — not a time series).
 
-**`nord/` two-file split.** `stations.csv` (metadata, one row per station,
-fully rewritten) is kept separate from `prix.csv` (time series, append-only)
-specifically to avoid repeating address text on every price row. Per-station
-history is further split into `nord/data/{station_id}.js` chunks — small
-JS files that assign into `window.NORD_DATA`, loaded on demand via a
-dynamically inserted `<script>` tag when a station is clicked on the map.
-This lets `carte_nord.html` work from `file://` with no server and no CORS
-issues, at the cost of the map view only ever holding *latest* prices
-in-memory (`latest_prices_by_station()` in `build_carte.py`) until a
-station's chunk is fetched.
+**Append-only, dedup-on-write price rows.** Rows are only added when a
+station reports a genuinely new price change, deduplicated on
+`(station_id, carburant, maj_officielle)` per-département file
+(`append_prix_rows` in `collect_prices.py`). This keeps files compact under
+frequent polling and makes reruns idempotent.
 
-**HTML generation is template substitution, not a template engine.** Both
-`generate_html()` (root) and `build_carte.py`'s `main()` embed data as a
-`__PLACEHOLDER__`-substituted JSON blob inside an HTML/JS string constant
-(`HTML_TEMPLATE`), then write the result. Charts are Plotly.js loaded from a
-CDN (`plotly.js-dist-min`) with no bundler; the map layer uses Plotly's
-`scattermap` (OSM tiles, no API key). All chart/table logic is inline
-`<script>` in the template — edit the Python string constant directly.
+**Everything the site needs is lazy-loaded by département/station — nothing
+is embedded in `index.html`.** With thousands of stations across 28
+départements, embedding the full dataset in the main page would make it
+multi-megabyte on every load. Instead `index.html` ships only the search UI
+plus two small lookups (`NOMS_DEPARTEMENTS`, `deptLatest` — current
+department-wide averages). Typing a postal code prefix loads
+`stations/{dept}.js` (that département's station list + latest prices, sets
+`window.STATIONS_DATA[dept]`); selecting a station loads `data/{id}.js` (that
+station's full price history, sets `window.STATION_HISTORY_DATA[id]`) and
+`dept_avg/{dept}.js` (that département's historical daily average per fuel,
+sets `window.DEPT_AVG_DATA[dept]`, overlaid as a dashed line on the evolution
+chart for comparison). All three chunk types are generated by `build_site.py`
+and cached client-side in `Set`s (`loadedStationChunks`, `loadedHistoryChunks`,
+`loadedAvgChunks`) once fetched. This mirrors — and generalizes — a pattern
+already used for per-station history chunks in the single-département version
+of this project.
 
-**Extending to another department.** Change `cp_prefix` in `nord/config.json`,
-clear `stations.csv`, `prix.csv`, and `nord/data/`, then rerun both scripts —
-see `nord/README.md` for details.
+**Department average series.** `average_series_for_department()` in
+`build_site.py` computes, per fuel, one point per calendar day where at least
+one station in that département changed price: the average of each station's
+latest known price as of that day (forward-filled between changes, i.e. a
+step function). This is what gets written to `dept_avg/{dept}.js` and
+overlaid on a station's evolution chart.
+
+**HTML generation is template substitution, not a template engine.**
+`build_site.py`'s `HTML_TEMPLATE` is a Python string with
+`__PLACEHOLDER__` markers substituted via `.replace()`, then written to
+`index.html`. Charts are Plotly.js loaded from a CDN (`plotly.js-dist-min`)
+with no bundler. All UI/search/chart logic is inline `<script>` in the
+template — edit the Python string constant directly.
+
+**Adding/removing a département.** Edit the `departements` object in
+`config.json` (2-digit code → display name), clear `stations.csv`, `prix/`,
+`data/`, `stations/`, `dept_avg/`, then rerun both scripts.
 
 ## CI/CD
 
-`.github/workflows/update.yml` runs both pipelines every 12h (`0 */12 * * *`
-UTC) and on manual dispatch (with an optional "full history refresh" input
-for the `nord/` pipeline), then commits and pushes any changed CSV/HTML/data
-files as `github-actions[bot]`. `concurrency.cancel-in-progress: false`
-ensures overlapping runs queue rather than race. GitHub Pages serves the
-repo root directly (`index.html`, `visualisation.html`, `nord/carte_nord.html`)
-— there is no separate deploy/build step.
+`.github/workflows/update.yml` runs both scripts every 12h (`0 */12 * * *`
+UTC) and on manual dispatch (with an optional "full history refresh" input),
+then commits and pushes any changed data as `github-actions[bot]`.
+`concurrency.cancel-in-progress: false` ensures overlapping runs queue rather
+than race. GitHub Pages serves the repo root directly (`index.html`) — there
+is no separate deploy/build step.
 
 See `GITHUB.md` for one-time repo setup (Pages + Actions write permissions)
-and `README.md` / `nord/README.md` for detailed usage of each pipeline.
+and `README.md` for detailed usage.

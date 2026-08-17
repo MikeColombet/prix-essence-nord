@@ -71,6 +71,6 @@ GitHub indique l'URL du site (mise à jour après 1-2 minutes), du type :
 
 Ensuite, la Action se relance automatiquement toutes les 12 heures
 (00:00 et 12:00 UTC) sans rien faire de plus. Pour forcer un rafraîchissement
-complet de l'historique des stations du Nord (au lieu des prix actuels
-seulement), relance-la manuellement avec la case "historique_complet_nord"
+complet de l'historique des stations suivies (au lieu des prix actuels
+seulement), relance-la manuellement avec la case "historique_complet"
 cochée.

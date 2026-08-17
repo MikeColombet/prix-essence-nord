@@ -7,8 +7,8 @@ on:
     - cron: "0 */12 * * *"
   workflow_dispatch:
     inputs:
-      historique_complet_nord:
-        description: "Retelecharger aussi l'historique complet des stations du Nord (plusieurs minutes, sinon prix actuels seulement)"
+      historique_complet:
+        description: "Retelecharger aussi l'historique complet des stations suivies (plusieurs minutes, sinon prix actuels seulement)"
         type: boolean
         default: false
 
@@ -32,24 +32,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Mettre a jour les stations du departement du Nord
+      - name: Mettre a jour les stations suivies
         env:
-          HISTORIQUE_COMPLET: ${{ github.event.inputs.historique_complet_nord }}
+          HISTORIQUE_COMPLET: ${{ github.event.inputs.historique_complet }}
         run: |
           if [ "$HISTORIQUE_COMPLET" = "true" ]; then
             echo "Import complet demande (archives annuelles + flux instantane)."
-            python3 build_nord.py
+            python3 collect_prices.py
           else
             echo "Mise a jour rapide (flux instantane seulement)."
-            python3 build_nord.py --maj-seulement
+            python3 collect_prices.py --maj-seulement
           fi
-          python3 build_carte.py
+          python3 build_site.py
 
       - name: Committer et pousser les changements
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add stations.csv prix.csv index.html data
+          git add stations.csv prix data stations dept_avg index.html
           if git diff --cached --quiet; then
             echo "Aucun changement de prix a enregistrer."
           else

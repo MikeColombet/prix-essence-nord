@@ -1,0 +1,2 @@
+window.STATION_HISTORY_DATA = window.STATION_HISTORY_DATA || {};
+window.STATION_HISTORY_DATA["77150005"] = [{"carburant": "Gazole", "prix_eur": "2.135", "maj_officielle": "2026-07-20T11:49:16"}, {"carburant": "E85", "prix_eur": "0.879", "maj_officielle": "2026-07-20T11:49:16"}, {"carburant": "E10", "prix_eur": "2.018", "maj_officielle": "2026-07-20T11:49:16"}, {"carburant": "SP98", "prix_eur": "2.119", "maj_officielle": "2026-07-20T11:49:17"}];
