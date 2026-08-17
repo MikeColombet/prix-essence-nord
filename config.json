@@ -1,7 +1,9 @@
 {
-  "station_id": "59700004",
-  "adresse_attendue": "boulevard clemenceau",
-  "cp_recherche": "59700",
-  "csv_filename": "historique_prix_essence.csv",
-  "html_filename": "visualisation.html"
+  "cp_prefix": "59",
+  "annees_passees": [2024, 2025],
+  "inclure_annee_courante": true,
+  "stations_filename": "stations.csv",
+  "prix_filename": "prix.csv",
+  "data_dir": "data",
+  "carte_filename": "index.html"
 }

@@ -1,9 +1,0 @@
-{
-  "cp_prefix": "59",
-  "annees_passees": [2024, 2025],
-  "inclure_annee_courante": true,
-  "stations_filename": "stations.csv",
-  "prix_filename": "prix.csv",
-  "data_dir": "data",
-  "carte_filename": "carte_nord.html"
-}

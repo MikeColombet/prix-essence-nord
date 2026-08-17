@@ -32,14 +32,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Mettre a jour la station Esso (Marcq-en-Baroeul)
-        run: python3 track_price.py
-
       - name: Mettre a jour les stations du departement du Nord
         env:
           HISTORIQUE_COMPLET: ${{ github.event.inputs.historique_complet_nord }}
         run: |
-          cd nord
           if [ "$HISTORIQUE_COMPLET" = "true" ]; then
             echo "Import complet demande (archives annuelles + flux instantane)."
             python3 build_nord.py
@@ -53,8 +49,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add historique_prix_essence.csv visualisation.html \
-                  nord/stations.csv nord/prix.csv nord/carte_nord.html nord/data
+          git add stations.csv prix.csv index.html data
           if git diff --cached --quiet; then
             echo "Aucun changement de prix a enregistrer."
           else

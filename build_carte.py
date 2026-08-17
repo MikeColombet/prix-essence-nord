@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Construit carte_nord.html : une carte interactive (Plotly, fond OpenStreetMap
+Construit index.html : une carte interactive (Plotly, fond OpenStreetMap
 gratuit, sans cle API) avec une station par marqueur. Cliquer sur une station
-charge son historique (fichier nord/data/{id}.js, genere par build_nord.py)
-et affiche les prix actuels + un graphique d'evolution.
+charge son historique (fichier data/{id}.js, genere par build_nord.py) et
+affiche les prix actuels + un graphique d'evolution. La page affiche aussi
+la moyenne departementale actuelle de chaque carburant, et la superpose
+(en pointilles) sur le graphique d'evolution de la station selectionnee.
 
 Usage : python3 build_carte.py
 (a relancer apres chaque python3 build_nord.py pour refleter les nouvelles
@@ -52,6 +54,67 @@ def latest_prices_by_station(prix_rows):
     return by_station
 
 
+def department_latest_averages(latest_by_station):
+    """Moyenne departementale actuelle de chaque carburant, calculee a
+    partir du dernier prix connu de chaque station (memes donnees que les
+    marqueurs de la carte, independamment de leur fraicheur)."""
+    sums = {}
+    counts = {}
+    for prices in latest_by_station.values():
+        for fuel, p in prices.items():
+            try:
+                val = float(p["prix_eur"])
+            except (TypeError, ValueError):
+                continue
+            sums[fuel] = sums.get(fuel, 0.0) + val
+            counts[fuel] = counts.get(fuel, 0) + 1
+    return {
+        fuel: {"avg": round(sums[fuel] / counts[fuel], 4), "n": counts[fuel]}
+        for fuel in sums
+    }
+
+
+def department_average_series(prix_rows):
+    """Serie temporelle de la moyenne departementale de chaque carburant :
+    pour chaque jour ou au moins un prix a change quelque part dans le
+    departement, la moyenne du dernier prix connu de chaque station a cette
+    date (report du dernier prix connu entre deux changements, comme un
+    graphique en escalier). Sert a superposer la tendance du departement au
+    graphique d'evolution d'une station."""
+    by_fuel = {}
+    for r in prix_rows:
+        try:
+            price = float(r["prix_eur"])
+        except (TypeError, ValueError):
+            continue
+        by_fuel.setdefault(r["carburant"], []).append(
+            (r["maj_officielle"], r["station_id"], price)
+        )
+
+    series = {}
+    for fuel, events in by_fuel.items():
+        events.sort(key=lambda e: e[0])
+        day_events = {}
+        for maj, sid, price in events:
+            day_events.setdefault(maj[:10], []).append((sid, price))
+
+        current = {}
+        points = []
+        for day in sorted(day_events.keys()):
+            for sid, price in day_events[day]:
+                current[sid] = price
+            if current:
+                points.append(
+                    {
+                        "date": day,
+                        "avg": round(sum(current.values()) / len(current), 4),
+                        "n": len(current),
+                    }
+                )
+        series[fuel] = points
+    return series
+
+
 HTML_TEMPLATE = """<!doctype html>
 <html lang="fr">
 <head>
@@ -97,6 +160,10 @@ HTML_TEMPLATE = """<!doctype html>
   .card .fuel { font-size: 0.7rem; text-transform: uppercase; color: #6b6b70; letter-spacing: .04em; }
   .card .price { font-size: 1.3rem; font-weight: 600; margin-top: 4px; }
   .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
+  .dept-avg-wrap {
+    background: #fff; border-radius: 10px; padding: 14px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
+  }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
   #chart { min-height: 320px; }
@@ -117,6 +184,11 @@ HTML_TEMPLATE = """<!doctype html>
     <div class="highlight-info" id="highlightInfo"></div>
   </div>
 
+  <div class="dept-avg-wrap">
+    <h2 class="section-title">Moyenne départementale actuelle</h2>
+    <div class="cards" id="deptAvgCards"></div>
+  </div>
+
   <div class="layout">
     <div class="map-wrap">
       <div id="map"></div>
@@ -128,6 +200,8 @@ HTML_TEMPLATE = """<!doctype html>
 
 <script>
 const stations = __STATIONS__;
+const deptLatest = __DEPT_LATEST__;
+const deptSeries = __DEPT_SERIES__;
 
 const FUEL_ORDER = ['Gazole', 'SP95', 'SP98', 'E10', 'E85', 'GPLc'];
 const fuelsAvailable = Array.from(new Set(stations.flatMap(s => Object.keys(s.prices))))
@@ -145,6 +219,22 @@ fuelsAvailable.forEach(f => {
   opt.value = f; opt.textContent = f;
   fuelSelect.appendChild(opt);
 });
+
+const deptAvgCardsEl = document.getElementById('deptAvgCards');
+if (fuelsAvailable.every(f => !deptLatest[f])) {
+  deptAvgCardsEl.innerHTML = '<p class="empty">Pas encore de prix connus pour calculer une moyenne.</p>';
+} else {
+  fuelsAvailable.forEach(fuel => {
+    const d = deptLatest[fuel];
+    if (!d) return;
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<div class="fuel">${fuel}</div>
+      <div class="price">${d.avg.toFixed(3)} €</div>
+      <div class="date">moyenne sur ${d.n} station(s)</div>`;
+    deptAvgCardsEl.appendChild(div);
+  });
+}
 
 function hoverFor(s) {
   const fuels = Object.keys(s.prices).sort();
@@ -315,6 +405,21 @@ function renderStation(station) {
     hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y %H:%M}<extra>' + fuel + '</extra>',
   }));
 
+  // Moyenne departementale du meme carburant, en pointilles, pour comparaison.
+  Object.keys(byFuel).sort().forEach(fuel => {
+    const avgSeries = deptSeries[fuel];
+    if (!avgSeries || avgSeries.length === 0) return;
+    traces.push({
+      x: avgSeries.map(p => parseDate(p.date)),
+      y: avgSeries.map(p => p.avg),
+      name: 'Moyenne 59 - ' + fuel,
+      mode: 'lines',
+      line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 1.5, dash: 'dot' },
+      opacity: 0.6,
+      hovertemplate: 'Moyenne departement : %{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
+    });
+  });
+
   try {
     if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
     Plotly.newPlot('chart', traces, {
@@ -400,7 +505,12 @@ def main():
         print("Aucune station avec prix connu et coordonnees valides : lance d'abord build_nord.py.")
         return
 
+    dept_latest = department_latest_averages(latest)
+    dept_series = department_average_series(prix_rows)
+
     html = HTML_TEMPLATE.replace("__STATIONS__", json.dumps(stations_payload, ensure_ascii=False))
+    html = html.replace("__DEPT_LATEST__", json.dumps(dept_latest, ensure_ascii=False))
+    html = html.replace("__DEPT_SERIES__", json.dumps(dept_series, ensure_ascii=False))
     html = html.replace("__NB_STATIONS__", str(len(stations_payload)))
     html = html.replace("__GENERATED__", datetime.now().strftime("%d/%m/%Y %H:%M"))
 
