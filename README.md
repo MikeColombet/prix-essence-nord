@@ -28,9 +28,10 @@ prix-carburants.gouv.fr), mis à jour côté gouvernement toutes les 10 minutes.
 - `data/{id}.js` — historique complet des prix d'une station, chargé à la
   demande quand tu la sélectionnes.
 - `dept_avg/{dept}.js` — moyenne historique d'un département par carburant,
-  chargée à la demande pour la superposer au graphique d'une station. Les
-  moyennes régionale et nationale sont assez petites (une valeur par jour, pas
-  par station) pour être embarquées directement dans `index.html`.
+  chargée à la demande quand tu cliques sur « Voir l'évolution du
+  département ». Les moyennes régionale et nationale sont assez petites (une
+  valeur par jour, pas par station) pour être embarquées directement dans
+  `index.html`.
 - `index.html` — la page de recherche (page d'accueil du dépôt / de GitHub Pages).
 
 Toutes ces données sont chargées à la demande, par département ou par
@@ -57,9 +58,7 @@ python3 build_site.py      # génère/actualise le site
 
 Ouvre ensuite `index.html` dans un navigateur, tape un code postal (au moins
 les 2 premiers chiffres) pour voir les stations du département, puis clique
-sur une station : ses prix actuels et son évolution s'affichent, avec en
-pointillés les moyennes département / région / nationale du même carburant
-pour comparaison.
+sur une station pour voir ses prix actuels et son évolution.
 
 À prévoir au premier lancement : `collect_prices.py` télécharge 3 archives
 annuelles complètes de la France (~10-35 Mo chacune, zip) avant de ne garder
@@ -86,11 +85,10 @@ partir du dernier prix connu de chaque station concernée) ; elles se
 recalculent pour refléter le département/la région de la station
 effectivement sélectionnée, pas seulement du code postal tapé.
 
-Quand tu sélectionnes une station, le graphique d'évolution superpose en
-pointillés (styles différents par niveau) les tendances historiques de ces
-trois moyennes — département, région, national — recalculées jour par jour à
-partir de `prix/*.csv`, pour comparer la station à son contexte local et
-national.
+Chaque niveau a son propre bouton « Voir l'évolution » : clique dessus pour
+afficher son graphique d'évolution (une courbe par carburant, recalculée jour
+par jour à partir de `prix/*.csv`). C'est un graphique indépendant, pas
+superposé à celui d'une station.
 
 ## Automatiser la collecte (macOS, optionnel)
 

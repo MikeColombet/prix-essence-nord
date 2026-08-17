@@ -5,9 +5,9 @@ Construit index.html : un site de recherche de stations-service par code
 postal (Hauts-de-France, Normandie, Grand Est, Ile-de-France). Tape un code
 postal, la liste des stations de son departement s'affiche, clique sur une
 station pour voir ses prix actuels et son evolution. La page affiche aussi
-la moyenne actuelle de chaque carburant pour le departement recherche, et la
-superpose (en pointilles) sur le graphique d'evolution de la station
-selectionnee.
+la moyenne actuelle de chaque carburant (departement, region, national), et
+un bouton "Voir l'evolution" sous chaque niveau ouvre son propre graphique
+d'evolution (independant de la station selectionnee, pas superpose dessus).
 
 La page principale ne contient aucune donnee de station ou de prix : elles
 sont chargees a la demande, par departement, depuis stations/{dept}.js,
@@ -273,6 +273,12 @@ HTML_TEMPLATE = """<!doctype html>
     letter-spacing: .04em; margin: 12px 0 6px;
   }
   .avg-group:first-child .avg-group-title { margin-top: 0; }
+  .evolution-btn {
+    margin-top: 10px; font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid #d8d8dc; background: #fff; color: #2980b9; cursor: pointer;
+  }
+  .evolution-btn:hover { background: #f5f6f8; }
+  .evolution-chart { margin-top: 12px; min-height: 380px; }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
   #chart { min-height: 560px; }
@@ -288,6 +294,8 @@ HTML_TEMPLATE = """<!doctype html>
   <div class="national-avg-wrap">
     <h2 class="section-title">Moyenne nationale actuelle <span class="dim">(departements suivis)</span></h2>
     <div class="cards" id="nationalAvgCards"></div>
+    <button type="button" class="evolution-btn" id="nationalEvolutionBtn">Voir l'evolution nationale</button>
+    <div class="evolution-chart" id="nationalChart" style="display:none"></div>
   </div>
 
   <div class="search-wrap">
@@ -301,10 +309,14 @@ HTML_TEMPLATE = """<!doctype html>
     <div class="avg-group">
       <div class="avg-group-title">Departement</div>
       <div class="cards" id="deptAvgCards"></div>
+      <button type="button" class="evolution-btn" id="deptEvolutionBtn">Voir l'evolution du departement</button>
+      <div class="evolution-chart" id="deptChart" style="display:none"></div>
     </div>
     <div class="avg-group">
       <div class="avg-group-title">Region</div>
       <div class="cards" id="regionAvgCards"></div>
+      <button type="button" class="evolution-btn" id="regionEvolutionBtn">Voir l'evolution de la region</button>
+      <div class="evolution-chart" id="regionChart" style="display:none"></div>
     </div>
   </div>
 
@@ -383,6 +395,12 @@ const resultsControls = document.getElementById('resultsControls');
 const resultsWrap = document.getElementById('resultsWrap');
 const detailsEl = document.getElementById('details');
 const fuelSelect = document.getElementById('fuelSelect');
+const nationalEvolutionBtn = document.getElementById('nationalEvolutionBtn');
+const nationalChartEl = document.getElementById('nationalChart');
+const deptEvolutionBtn = document.getElementById('deptEvolutionBtn');
+const deptChartEl = document.getElementById('deptChart');
+const regionEvolutionBtn = document.getElementById('regionEvolutionBtn');
+const regionChartEl = document.getElementById('regionChart');
 
 cpInput.addEventListener('input', () => {
   const digits = cpInput.value.replace(/\\D/g, '').slice(0, 5);
@@ -415,17 +433,128 @@ function renderAvgCards(container, avgs, emptyMessage) {
 
 renderAvgCards(nationalAvgCards, nationalLatest, "Pas encore de prix connus.");
 
+// Graphique d'evolution d'un niveau (departement, region ou national) : ses
+// propres tendances uniquement, pas de superposition avec une station.
+function renderSeriesChart(divId, seriesByFuel) {
+  const el = document.getElementById(divId);
+  const fuels = sortFuels(Object.keys(seriesByFuel || {}).filter(f => seriesByFuel[f] && seriesByFuel[f].length));
+  if (fuels.length === 0) {
+    el.innerHTML = '<p class="empty">Pas encore d\\'historique disponible.</p>';
+    return;
+  }
+  const idxRef = { i: 0 };
+  const traces = fuels.map(fuel => ({
+    x: seriesByFuel[fuel].map(p => parseDate(p.date)),
+    y: seriesByFuel[fuel].map(p => p.avg),
+    name: fuel,
+    mode: 'lines',
+    line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 2 },
+    hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
+  }));
+  try {
+    if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    Plotly.newPlot(divId, traces, {
+      height: 380,
+      margin: { t: 10, r: 20, l: 55, b: 60 },
+      hovermode: 'x unified',
+      legend: { orientation: 'h', y: -0.25 },
+      xaxis: { type: 'date', rangeslider: { visible: true } },
+      yaxis: { title: 'Prix moyen (EUR / litre)' },
+    }, { responsive: true, displaylogo: false });
+  } catch (e) {
+    el.innerHTML = `<p class="empty">Graphique indisponible : ${e.message}</p>`;
+    console.error(e);
+  }
+}
+
+function toggleEvolution(btn, el, label, renderFn) {
+  const showing = el.style.display !== 'none';
+  if (showing) {
+    el.style.display = 'none';
+    btn.textContent = label;
+    return;
+  }
+  el.style.display = 'block';
+  btn.textContent = label.replace("Voir", "Masquer");
+  renderFn();
+}
+
+nationalEvolutionBtn.addEventListener('click', () => {
+  toggleEvolution(nationalEvolutionBtn, nationalChartEl, "Voir l'evolution nationale", () => {
+    if (!nationalChartEl.dataset.rendered) {
+      renderSeriesChart('nationalChart', nationalSeries);
+      nationalChartEl.dataset.rendered = '1';
+    }
+  });
+});
+
+let currentDept = null;
+let currentRegion = null;
+
 // Moyennes departement + region pour une station donnee (code postal de la
 // station selectionnee, ou du departement recherche avant toute selection).
 function showLocalAvg(dept) {
-  const region = DEPT_TO_REGION[dept];
+  currentDept = dept;
+  currentRegion = DEPT_TO_REGION[dept] || null;
+
   deptAvgLabel.textContent = NOMS_DEPARTEMENTS[dept]
-    ? `(${dept} - ${NOMS_DEPARTEMENTS[dept]}${region ? ' / ' + region : ''})`
+    ? `(${dept} - ${NOMS_DEPARTEMENTS[dept]}${currentRegion ? ' / ' + currentRegion : ''})`
     : `(${dept})`;
   deptAvgWrap.style.display = 'block';
   renderAvgCards(deptAvgCards, deptLatest[dept], "Pas encore de prix connus pour ce departement.");
-  renderAvgCards(regionAvgCards, region ? regionLatest[region] : null, "Pas encore de prix connus pour cette region.");
+  renderAvgCards(regionAvgCards, currentRegion ? regionLatest[currentRegion] : null, "Pas encore de prix connus pour cette region.");
+
+  // Le departement/la region ont pu changer : referme les graphiques
+  // ouverts pour un contexte precedent plutot que de laisser un graphique
+  // perime affiche.
+  deptChartEl.style.display = 'none';
+  deptChartEl.removeAttribute('data-rendered-for');
+  deptEvolutionBtn.textContent = "Voir l'evolution du departement";
+  regionChartEl.style.display = 'none';
+  regionChartEl.removeAttribute('data-rendered-for');
+  regionEvolutionBtn.textContent = "Voir l'evolution de la region";
 }
+
+deptEvolutionBtn.addEventListener('click', async () => {
+  if (!currentDept) return;
+  const showing = deptChartEl.style.display !== 'none';
+  if (showing) {
+    deptChartEl.style.display = 'none';
+    deptEvolutionBtn.textContent = "Voir l'evolution du departement";
+    return;
+  }
+  deptChartEl.style.display = 'block';
+  deptEvolutionBtn.textContent = "Masquer l'evolution du departement";
+  if (deptChartEl.dataset.renderedFor === currentDept) return;
+  deptChartEl.innerHTML = '<p class="empty">Chargement...</p>';
+  if (!loadedAvgChunks.has(currentDept)) {
+    try {
+      await loadScript('dept_avg/' + currentDept + '.js');
+      loadedAvgChunks.add(currentDept);
+    } catch (e) {
+      deptChartEl.innerHTML = `<p class="empty">${e.message}</p>`;
+      return;
+    }
+  }
+  const series = (window.DEPT_AVG_DATA && window.DEPT_AVG_DATA[currentDept]) || {};
+  renderSeriesChart('deptChart', series);
+  deptChartEl.dataset.renderedFor = currentDept;
+});
+
+regionEvolutionBtn.addEventListener('click', () => {
+  if (!currentRegion) return;
+  const showing = regionChartEl.style.display !== 'none';
+  if (showing) {
+    regionChartEl.style.display = 'none';
+    regionEvolutionBtn.textContent = "Voir l'evolution de la region";
+    return;
+  }
+  regionChartEl.style.display = 'block';
+  regionEvolutionBtn.textContent = "Masquer l'evolution de la region";
+  if (regionChartEl.dataset.renderedFor === currentRegion) return;
+  renderSeriesChart('regionChart', regionSeries[currentRegion] || {});
+  regionChartEl.dataset.renderedFor = currentRegion;
+});
 
 async function onSearch(cp) {
   if (cp.length < 2) {
@@ -561,10 +690,6 @@ async function selectStation(station) {
       await loadScript('data/' + station.id + '.js');
       loadedHistoryChunks.add(station.id);
     }
-    if (!loadedAvgChunks.has(dept)) {
-      await loadScript('dept_avg/' + dept + '.js');
-      loadedAvgChunks.add(dept);
-    }
   } catch (e) {
     document.getElementById('chart').innerHTML = `<p class="empty">${e.message}</p>`;
     return;
@@ -583,11 +708,6 @@ async function selectStation(station) {
   });
   Object.values(byFuel).forEach(arr => arr.sort((a, b) => a.x - b.x));
 
-  const region = DEPT_TO_REGION[dept];
-  const deptSeries = (window.DEPT_AVG_DATA && window.DEPT_AVG_DATA[dept]) || {};
-  const regSeries = region ? (regionSeries[region] || {}) : {};
-  const natSeries = nationalSeries || {};
-
   const idxRef = { i: 0 };
   const traces = Object.keys(byFuel).sort().map(fuel => ({
     x: byFuel[fuel].map(p => p.x),
@@ -597,29 +717,6 @@ async function selectStation(station) {
     line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 2 },
     hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y %H:%M}<extra>' + fuel + '</extra>',
   }));
-
-  // Moyennes departement / region / nationale pour le meme carburant, en
-  // traits fins et pointilles distincts, pour comparaison avec la station.
-  const overlays = [
-    { series: deptSeries, dash: 'dot', label: 'Moyenne ' + dept, hover: 'Moyenne departement' },
-    { series: regSeries, dash: 'dash', label: 'Moyenne ' + (region || '?'), hover: 'Moyenne region' },
-    { series: natSeries, dash: 'longdashdot', label: 'Moyenne nationale', hover: 'Moyenne nationale' },
-  ];
-  Object.keys(byFuel).sort().forEach(fuel => {
-    overlays.forEach(({ series, dash, label, hover }) => {
-      const avgSeries = series[fuel];
-      if (!avgSeries || avgSeries.length === 0) return;
-      traces.push({
-        x: avgSeries.map(p => parseDate(p.date)),
-        y: avgSeries.map(p => p.avg),
-        name: label + ' - ' + fuel,
-        mode: 'lines',
-        line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 1.5, dash },
-        opacity: 0.55,
-        hovertemplate: hover + ' : %{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
-      });
-    });
-  });
 
   try {
     if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
