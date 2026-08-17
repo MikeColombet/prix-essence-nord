@@ -1,8 +1,8 @@
 # Recherche des prix essence – Hauts-de-France, Normandie, Grand Est, Île-de-France
 
 Site de recherche des stations-service par code postal, avec prix actuels,
-comparaison moins chère / plus chère, moyennes département / région / nationale
-par carburant et historique par station. Couvre les 28 départements des régions
+moyennes département / région / nationale par carburant (actuelles et leur
+évolution) et historique par station. Couvre les 28 départements des régions
 Hauts-de-France, Normandie, Grand Est et Île-de-France (voir la liste dans
 `config.json`).
 

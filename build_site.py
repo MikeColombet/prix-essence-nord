@@ -225,16 +225,6 @@ HTML_TEMPLATE = """<!doctype html>
     width: 200px; max-width: 100%;
   }
   .search-hint { font-size: 0.8rem; color: #6b6b70; margin-top: 6px; }
-  .results-controls {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    background: #fff; border-radius: 10px; padding: 12px 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
-  }
-  .results-controls label { font-size: 0.85rem; color: #444; }
-  .results-controls select { font-size: 0.9rem; padding: 4px 6px; border-radius: 6px; border: 1px solid #d8d8dc; }
-  .highlight-info { font-size: 0.85rem; display: flex; gap: 18px; flex-wrap: wrap; }
-  .highlight-info .cheap { color: #1e8e3e; font-weight: 600; }
-  .highlight-info .expensive { color: #c0392b; font-weight: 600; }
   .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
   .results-wrap {
     background: #fff; border-radius: 10px; padding: 12px;
@@ -320,12 +310,6 @@ HTML_TEMPLATE = """<!doctype html>
     </div>
   </div>
 
-  <div class="results-controls" id="resultsControls" style="display:none">
-    <label for="fuelSelect">Comparer par carburant :</label>
-    <select id="fuelSelect"></select>
-    <div class="highlight-info" id="highlightInfo"></div>
-  </div>
-
   <div class="layout">
     <div class="results-wrap" id="resultsWrap">
       <p class="empty">Cherche un code postal pour afficher les stations.</p>
@@ -359,18 +343,6 @@ function parseDate(s) {
   return new Date(s.includes('T') ? s : s.replace(' ', 'T'));
 }
 
-function refPriceFor(s, fuel) {
-  if (s.prices[fuel]) return parseFloat(s.prices[fuel].prix_eur);
-  return null;
-}
-
-const FRESHNESS_HOURS = 72;
-function isFresh(s, fuel) {
-  if (!s.prices[fuel]) return false;
-  const ageMs = Date.now() - parseDate(s.prices[fuel].maj_officielle).getTime();
-  return ageMs <= FRESHNESS_HOURS * 60 * 60 * 1000;
-}
-
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -391,10 +363,8 @@ const deptAvgLabel = document.getElementById('deptAvgLabel');
 const deptAvgCards = document.getElementById('deptAvgCards');
 const regionAvgCards = document.getElementById('regionAvgCards');
 const nationalAvgCards = document.getElementById('nationalAvgCards');
-const resultsControls = document.getElementById('resultsControls');
 const resultsWrap = document.getElementById('resultsWrap');
 const detailsEl = document.getElementById('details');
-const fuelSelect = document.getElementById('fuelSelect');
 const nationalEvolutionBtn = document.getElementById('nationalEvolutionBtn');
 const nationalChartEl = document.getElementById('nationalChart');
 const deptEvolutionBtn = document.getElementById('deptEvolutionBtn');
@@ -410,7 +380,6 @@ cpInput.addEventListener('input', () => {
 
 function resetResults(message) {
   deptAvgWrap.style.display = 'none';
-  resultsControls.style.display = 'none';
   resultsWrap.innerHTML = `<p class="empty">${message}</p>`;
 }
 
@@ -590,19 +559,9 @@ function renderResults(dept, cp) {
   const matches = all.filter(s => s.cp.startsWith(cp)).sort((a, b) => a.adresse.localeCompare(b.adresse));
 
   if (matches.length === 0) {
-    resultsControls.style.display = 'none';
     resultsWrap.innerHTML = '<p class="empty">Aucune station trouvee pour ce code postal.</p>';
     return;
   }
-
-  const fuelsHere = sortFuels(Array.from(new Set(matches.flatMap(s => Object.keys(s.prices)))));
-  fuelSelect.innerHTML = '';
-  fuelsHere.forEach(f => {
-    const opt = document.createElement('option');
-    opt.value = f; opt.textContent = f;
-    fuelSelect.appendChild(opt);
-  });
-  resultsControls.style.display = fuelsHere.length ? 'flex' : 'none';
 
   const shown = matches.slice(0, RESULTS_LIMIT);
   let html = `<div class="results-count">${matches.length} station(s) trouvee(s)` +
@@ -623,28 +582,6 @@ function renderResults(dept, cp) {
       if (station) selectStation(station);
     });
   });
-
-  if (fuelsHere.length) {
-    updateHighlight(fuelSelect.value, matches);
-    fuelSelect.onchange = () => updateHighlight(fuelSelect.value, matches);
-  }
-}
-
-function updateHighlight(fuel, matches) {
-  const info = document.getElementById('highlightInfo');
-  const withFuel = matches.filter(s => isFresh(s, fuel));
-  if (withFuel.length === 0) {
-    info.innerHTML = `<span class="empty">Aucun prix ${fuel} mis a jour dans les dernieres ${FRESHNESS_HOURS}h parmi ces resultats.</span>`;
-    return;
-  }
-  let cheapest = withFuel[0], priciest = withFuel[0];
-  withFuel.forEach(s => {
-    if (refPriceFor(s, fuel) < refPriceFor(cheapest, fuel)) cheapest = s;
-    if (refPriceFor(s, fuel) > refPriceFor(priciest, fuel)) priciest = s;
-  });
-  info.innerHTML =
-    `<span class="cheap">Moins chere : ${cheapest.adresse}, ${cheapest.ville} - ${refPriceFor(cheapest, fuel).toFixed(3)} €</span>` +
-    `<span class="expensive">Plus chere : ${priciest.adresse}, ${priciest.ville} - ${refPriceFor(priciest, fuel).toFixed(3)} €</span>`;
 }
 
 const colors = {
