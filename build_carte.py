@@ -142,15 +142,15 @@ HTML_TEMPLATE = """<!doctype html>
   .highlight-info { font-size: 0.85rem; display: flex; gap: 18px; flex-wrap: wrap; }
   .highlight-info .cheap { color: #1e8e3e; font-weight: 600; }
   .highlight-info .expensive { color: #c0392b; font-weight: 600; }
-  .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .layout { display: flex; flex-direction: column; gap: 20px; }
   .map-wrap {
     background: #fff; border-radius: 10px; padding: 12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1 1 560px; min-width: 320px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   }
   #map { width: 100%; height: 620px; }
   .details {
     background: #fff; border-radius: 10px; padding: 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1 1 420px; min-width: 320px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   }
   .empty { color: #6b6b70; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
@@ -166,7 +166,7 @@ HTML_TEMPLATE = """<!doctype html>
   }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
-  #chart { min-height: 320px; }
+  #chart { min-height: 560px; }
 </style>
 </head>
 <body>
@@ -277,7 +277,7 @@ function buildMapTrace(fuel) {
       cmax: Math.max(...withFuel.map(s => refPriceFor(s, fuel))),
       opacity: 0.9,
       line: { width: 1, color: '#ffffff' },
-      colorbar: { title: fuel + ' (€)', thickness: 14, len: 0.6 },
+      showscale: false,
     },
   };
 }
@@ -423,6 +423,7 @@ function renderStation(station) {
   try {
     if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
     Plotly.newPlot('chart', traces, {
+      height: 560,
       margin: { t: 10, r: 20, l: 55, b: 70 },
       hovermode: 'x unified',
       legend: { orientation: 'h', y: -0.2 },
