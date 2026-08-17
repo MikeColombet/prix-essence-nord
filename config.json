@@ -29,6 +29,12 @@
     "94": "Val-de-Marne",
     "95": "Val-d'Oise"
   },
+  "regions": {
+    "Hauts-de-France": ["02", "59", "60", "62", "80"],
+    "Normandie": ["14", "27", "50", "61", "76"],
+    "Grand Est": ["08", "10", "51", "52", "54", "55", "57", "67", "68", "88"],
+    "Ile-de-France": ["75", "77", "78", "91", "92", "93", "94", "95"]
+  },
   "annees_passees": [2024, 2025],
   "inclure_annee_courante": true,
   "stations_filename": "stations.csv",

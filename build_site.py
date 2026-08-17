@@ -73,41 +73,45 @@ def latest_prices_by_station(prix_rows):
     return by_station
 
 
-def department_latest_averages(latest_by_station, stations_by_id):
-    """Moyenne actuelle de chaque carburant, par departement (calculee a
-    partir du dernier prix connu de chaque station de ce departement)."""
+def grouped_latest_averages(latest_by_station, stations_by_id, group_for_cp):
+    """Moyenne actuelle de chaque carburant, regroupee par la clef que
+    renvoie group_for_cp(cp) (departement, region, ou une constante unique
+    pour une moyenne nationale) ; calculee a partir du dernier prix connu de
+    chaque station. group_for_cp doit renvoyer None pour exclure une station."""
     sums = {}
     counts = {}
     for sid, prices in latest_by_station.items():
         cp = stations_by_id.get(sid, {}).get("cp", "")
-        dept = cp[:2]
-        if not dept:
+        group = group_for_cp(cp)
+        if group is None:
             continue
         for fuel, p in prices.items():
             try:
                 val = float(p["prix_eur"])
             except (TypeError, ValueError):
                 continue
-            sums.setdefault(dept, {})
-            counts.setdefault(dept, {})
-            sums[dept][fuel] = sums[dept].get(fuel, 0.0) + val
-            counts[dept][fuel] = counts[dept].get(fuel, 0) + 1
+            sums.setdefault(group, {})
+            counts.setdefault(group, {})
+            sums[group][fuel] = sums[group].get(fuel, 0.0) + val
+            counts[group][fuel] = counts[group].get(fuel, 0) + 1
     result = {}
-    for dept, fuel_sums in sums.items():
-        result[dept] = {
-            fuel: {"avg": round(fuel_sums[fuel] / counts[dept][fuel], 4), "n": counts[dept][fuel]}
+    for group, fuel_sums in sums.items():
+        result[group] = {
+            fuel: {"avg": round(fuel_sums[fuel] / counts[group][fuel], 4), "n": counts[group][fuel]}
             for fuel in fuel_sums
         }
     return result
 
 
-def average_series_for_department(prix_rows):
-    """Serie temporelle de la moyenne d'un departement pour chaque carburant :
-    pour chaque jour ou au moins un prix a change dans le departement, la
-    moyenne du dernier prix connu de chaque station a cette date (report du
-    dernier prix connu entre deux changements, comme un graphique en
-    escalier). Sert a superposer la tendance du departement au graphique
-    d'evolution d'une station."""
+def average_series(prix_rows):
+    """Serie temporelle de la moyenne d'un ensemble de lignes de prix pour
+    chaque carburant : pour chaque jour ou au moins un prix a change parmi
+    ces lignes, la moyenne du dernier prix connu de chaque station a cette
+    date (report du dernier prix connu entre deux changements, comme un
+    graphique en escalier). Utilisee pour les moyennes departementale,
+    regionale et nationale : meme calcul, seul l'ensemble de lignes passe en
+    entree change (un departement, les departements d'une region, ou tout).
+    Sert a superposer ces tendances au graphique d'evolution d'une station."""
     by_fuel = {}
     for r in prix_rows:
         try:
@@ -259,10 +263,16 @@ HTML_TEMPLATE = """<!doctype html>
   .card .fuel { font-size: 0.7rem; text-transform: uppercase; color: #6b6b70; letter-spacing: .04em; }
   .card .price { font-size: 1.3rem; font-weight: 600; margin-top: 4px; }
   .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
-  .dept-avg-wrap {
+  .dept-avg-wrap, .national-avg-wrap {
     background: #fff; border-radius: 10px; padding: 14px 18px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
   }
+  .section-title .dim { font-weight: 400; color: #6b6b70; font-size: 0.85rem; }
+  .avg-group-title {
+    font-size: 0.7rem; text-transform: uppercase; color: #6b6b70;
+    letter-spacing: .04em; margin: 12px 0 6px;
+  }
+  .avg-group:first-child .avg-group-title { margin-top: 0; }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
   #chart { min-height: 560px; }
@@ -275,6 +285,11 @@ HTML_TEMPLATE = """<!doctype html>
   Normandie, Grand Est et Ile-de-France.</p>
   <div class="meta">__NB_STATIONS__ station(s) suivies sur __NB_DEPARTEMENTS__ departement(s) &middot; page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
 
+  <div class="national-avg-wrap">
+    <h2 class="section-title">Moyenne nationale actuelle <span class="dim">(departements suivis)</span></h2>
+    <div class="cards" id="nationalAvgCards"></div>
+  </div>
+
   <div class="search-wrap">
     <label for="cpInput">Code postal :</label>
     <input id="cpInput" type="text" inputmode="numeric" autocomplete="off" placeholder="ex : 59700" maxlength="5">
@@ -282,8 +297,15 @@ HTML_TEMPLATE = """<!doctype html>
   </div>
 
   <div class="dept-avg-wrap" id="deptAvgWrap" style="display:none">
-    <h2 class="section-title">Moyenne actuelle du departement <span id="deptAvgLabel"></span></h2>
-    <div class="cards" id="deptAvgCards"></div>
+    <h2 class="section-title">Moyennes actuelles <span id="deptAvgLabel"></span></h2>
+    <div class="avg-group">
+      <div class="avg-group-title">Departement</div>
+      <div class="cards" id="deptAvgCards"></div>
+    </div>
+    <div class="avg-group">
+      <div class="avg-group-title">Region</div>
+      <div class="cards" id="regionAvgCards"></div>
+    </div>
   </div>
 
   <div class="results-controls" id="resultsControls" style="display:none">
@@ -303,7 +325,12 @@ HTML_TEMPLATE = """<!doctype html>
 
 <script>
 const NOMS_DEPARTEMENTS = __NOMS_DEPARTEMENTS__;
+const DEPT_TO_REGION = __DEPT_TO_REGION__;
 const deptLatest = __DEPT_LATEST__;
+const regionLatest = __REGION_LATEST__;
+const regionSeries = __REGION_SERIES__;
+const nationalLatest = __NATIONAL_LATEST__;
+const nationalSeries = __NATIONAL_SERIES__;
 
 const FUEL_ORDER = ['Gazole', 'SP95', 'SP98', 'E10', 'E85', 'GPLc'];
 function sortFuels(fuels) {
@@ -350,6 +377,8 @@ const cpInput = document.getElementById('cpInput');
 const deptAvgWrap = document.getElementById('deptAvgWrap');
 const deptAvgLabel = document.getElementById('deptAvgLabel');
 const deptAvgCards = document.getElementById('deptAvgCards');
+const regionAvgCards = document.getElementById('regionAvgCards');
+const nationalAvgCards = document.getElementById('nationalAvgCards');
 const resultsControls = document.getElementById('resultsControls');
 const resultsWrap = document.getElementById('resultsWrap');
 const detailsEl = document.getElementById('details');
@@ -367,15 +396,12 @@ function resetResults(message) {
   resultsWrap.innerHTML = `<p class="empty">${message}</p>`;
 }
 
-function showDeptAvg(dept) {
-  deptAvgLabel.textContent = NOMS_DEPARTEMENTS[dept] ? `(${dept} - ${NOMS_DEPARTEMENTS[dept]})` : `(${dept})`;
-  const avgs = deptLatest[dept];
-  deptAvgWrap.style.display = 'block';
-  if (!avgs) {
-    deptAvgCards.innerHTML = '<p class="empty">Pas encore de prix connus pour ce departement.</p>';
+function renderAvgCards(container, avgs, emptyMessage) {
+  if (!avgs || Object.keys(avgs).length === 0) {
+    container.innerHTML = `<p class="empty">${emptyMessage}</p>`;
     return;
   }
-  deptAvgCards.innerHTML = '';
+  container.innerHTML = '';
   sortFuels(Object.keys(avgs)).forEach(fuel => {
     const d = avgs[fuel];
     const div = document.createElement('div');
@@ -383,8 +409,22 @@ function showDeptAvg(dept) {
     div.innerHTML = `<div class="fuel">${fuel}</div>
       <div class="price">${d.avg.toFixed(3)} €</div>
       <div class="date">moyenne sur ${d.n} station(s)</div>`;
-    deptAvgCards.appendChild(div);
+    container.appendChild(div);
   });
+}
+
+renderAvgCards(nationalAvgCards, nationalLatest, "Pas encore de prix connus.");
+
+// Moyennes departement + region pour une station donnee (code postal de la
+// station selectionnee, ou du departement recherche avant toute selection).
+function showLocalAvg(dept) {
+  const region = DEPT_TO_REGION[dept];
+  deptAvgLabel.textContent = NOMS_DEPARTEMENTS[dept]
+    ? `(${dept} - ${NOMS_DEPARTEMENTS[dept]}${region ? ' / ' + region : ''})`
+    : `(${dept})`;
+  deptAvgWrap.style.display = 'block';
+  renderAvgCards(deptAvgCards, deptLatest[dept], "Pas encore de prix connus pour ce departement.");
+  renderAvgCards(regionAvgCards, region ? regionLatest[region] : null, "Pas encore de prix connus pour cette region.");
 }
 
 async function onSearch(cp) {
@@ -398,7 +438,7 @@ async function onSearch(cp) {
     return;
   }
 
-  showDeptAvg(dept);
+  showLocalAvg(dept);
 
   if (!loadedStationChunks.has(dept)) {
     resultsWrap.innerHTML = '<p class="empty">Chargement des stations...</p>';
@@ -492,6 +532,11 @@ function colorFor(name, idxRef) {
 }
 
 async function selectStation(station) {
+  // Reflete explicitement le departement/la region de la station selectionnee
+  // (et pas seulement du code postal tape dans la recherche).
+  const dept = station.cp.slice(0, 2);
+  showLocalAvg(dept);
+
   detailsEl.innerHTML = `
     <div class="station-title">${station.adresse}</div>
     <div class="station-sub">${station.cp} ${station.ville} &middot; id ${station.id}</div>
@@ -511,7 +556,6 @@ async function selectStation(station) {
     cardsEl.appendChild(div);
   });
 
-  const dept = station.cp.slice(0, 2);
   try {
     if (!loadedHistoryChunks.has(station.id)) {
       await loadScript('data/' + station.id + '.js');
@@ -539,7 +583,10 @@ async function selectStation(station) {
   });
   Object.values(byFuel).forEach(arr => arr.sort((a, b) => a.x - b.x));
 
+  const region = DEPT_TO_REGION[dept];
   const deptSeries = (window.DEPT_AVG_DATA && window.DEPT_AVG_DATA[dept]) || {};
+  const regSeries = region ? (regionSeries[region] || {}) : {};
+  const natSeries = nationalSeries || {};
 
   const idxRef = { i: 0 };
   const traces = Object.keys(byFuel).sort().map(fuel => ({
@@ -551,18 +598,26 @@ async function selectStation(station) {
     hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y %H:%M}<extra>' + fuel + '</extra>',
   }));
 
-  // Moyenne du departement pour le meme carburant, en pointilles, pour comparaison.
+  // Moyennes departement / region / nationale pour le meme carburant, en
+  // traits fins et pointilles distincts, pour comparaison avec la station.
+  const overlays = [
+    { series: deptSeries, dash: 'dot', label: 'Moyenne ' + dept, hover: 'Moyenne departement' },
+    { series: regSeries, dash: 'dash', label: 'Moyenne ' + (region || '?'), hover: 'Moyenne region' },
+    { series: natSeries, dash: 'longdashdot', label: 'Moyenne nationale', hover: 'Moyenne nationale' },
+  ];
   Object.keys(byFuel).sort().forEach(fuel => {
-    const avgSeries = deptSeries[fuel];
-    if (!avgSeries || avgSeries.length === 0) return;
-    traces.push({
-      x: avgSeries.map(p => parseDate(p.date)),
-      y: avgSeries.map(p => p.avg),
-      name: 'Moyenne ' + dept + ' - ' + fuel,
-      mode: 'lines',
-      line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 1.5, dash: 'dot' },
-      opacity: 0.6,
-      hovertemplate: 'Moyenne departement : %{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
+    overlays.forEach(({ series, dash, label, hover }) => {
+      const avgSeries = series[fuel];
+      if (!avgSeries || avgSeries.length === 0) return;
+      traces.push({
+        x: avgSeries.map(p => parseDate(p.date)),
+        y: avgSeries.map(p => p.avg),
+        name: label + ' - ' + fuel,
+        mode: 'lines',
+        line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 1.5, dash },
+        opacity: 0.55,
+        hovertemplate: hover + ' : %{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
+      });
     });
   });
 
@@ -600,6 +655,8 @@ async function selectStation(station) {
 def main():
     config = load_config()
     departements = config["departements"]
+    regions = config["regions"]
+    dept_to_region = {d: region for region, depts in regions.items() for d in depts}
     stations_path = os.path.join(BASE_DIR, config["stations_filename"])
     prix_dir = os.path.join(BASE_DIR, config["prix_dir"])
     stations_dir = os.path.join(BASE_DIR, config["stations_dir"])
@@ -619,17 +676,33 @@ def main():
 
     by_dept, skipped_no_coords, skipped_no_price = write_station_chunks(stations_dir, stations_rows, latest)
 
-    dept_series_by_dept = {
-        dept: average_series_for_department(rows) for dept, rows in prix_by_dept.items()
-    }
+    dept_series_by_dept = {dept: average_series(rows) for dept, rows in prix_by_dept.items()}
     write_dept_avg_chunks(dept_avg_dir, dept_series_by_dept)
 
-    dept_latest = department_latest_averages(latest, stations_by_id)
+    region_series_by_region = {
+        region: average_series([r for d in depts for r in prix_by_dept.get(d, [])])
+        for region, depts in regions.items()
+    }
+    national_series = average_series(all_prix_rows)
+
+    dept_latest = grouped_latest_averages(latest, stations_by_id, lambda cp: cp[:2] or None)
+    region_latest = grouped_latest_averages(
+        latest, stations_by_id, lambda cp: dept_to_region.get(cp[:2])
+    )
+    national_latest_grouped = grouped_latest_averages(
+        latest, stations_by_id, lambda cp: "national" if cp[:2] else None
+    )
+    national_latest = national_latest_grouped.get("national", {})
 
     nb_stations = sum(len(v) for v in by_dept.values())
 
     html = HTML_TEMPLATE.replace("__NOMS_DEPARTEMENTS__", json.dumps(departements, ensure_ascii=False))
+    html = html.replace("__DEPT_TO_REGION__", json.dumps(dept_to_region, ensure_ascii=False))
     html = html.replace("__DEPT_LATEST__", json.dumps(dept_latest, ensure_ascii=False))
+    html = html.replace("__REGION_LATEST__", json.dumps(region_latest, ensure_ascii=False))
+    html = html.replace("__REGION_SERIES__", json.dumps(region_series_by_region, ensure_ascii=False))
+    html = html.replace("__NATIONAL_LATEST__", json.dumps(national_latest, ensure_ascii=False))
+    html = html.replace("__NATIONAL_SERIES__", json.dumps(national_series, ensure_ascii=False))
     html = html.replace("__NB_STATIONS__", str(nb_stations))
     html = html.replace("__NB_DEPARTEMENTS__", str(len(by_dept)))
     html = html.replace("__GENERATED__", datetime.now().strftime("%d/%m/%Y %H:%M"))
