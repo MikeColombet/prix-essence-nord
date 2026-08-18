@@ -361,17 +361,26 @@ HTML_TEMPLATE = """<!doctype html>
   comme un seul departement, son code postal ne distinguant pas 2A/2B).</p>
   <div class="meta">__NB_STATIONS__ station(s) suivies sur __NB_DEPARTEMENTS__ departement(s) &middot; page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
 
+  <div class="search-wrap">
+    <label for="cpInput">Code postal :</label>
+    <input id="cpInput" type="text" inputmode="numeric" autocomplete="off" placeholder="ex : 59700" maxlength="5">
+    <div class="search-hint" id="searchHint">Tape au moins les 2 premiers chiffres d'un code postal pour voir les stations du departement.</div>
+  </div>
+
+  <div class="layout">
+    <div class="results-wrap" id="resultsWrap">
+      <p class="empty">Cherche un code postal pour afficher les stations.</p>
+    </div>
+    <div class="details" id="details">
+      <p class="empty">Selectionne une station dans la liste pour voir ses prix et son evolution.</p>
+    </div>
+  </div>
+
   <div class="national-avg-wrap">
     <h2 class="section-title">Moyenne nationale actuelle <span class="dim">(departements suivis)</span></h2>
     <div class="cards" id="nationalAvgCards"></div>
     <button type="button" class="evolution-btn" id="nationalEvolutionBtn">Voir l'evolution nationale</button>
     <div class="evolution-chart" id="nationalChart" style="display:none"></div>
-  </div>
-
-  <div class="search-wrap">
-    <label for="cpInput">Code postal :</label>
-    <input id="cpInput" type="text" inputmode="numeric" autocomplete="off" placeholder="ex : 59700" maxlength="5">
-    <div class="search-hint" id="searchHint">Tape au moins les 2 premiers chiffres d'un code postal pour voir les stations du departement.</div>
   </div>
 
   <div class="dept-avg-wrap" id="deptAvgWrap" style="display:none">
@@ -387,15 +396,6 @@ HTML_TEMPLATE = """<!doctype html>
       <div class="cards" id="regionAvgCards"></div>
       <button type="button" class="evolution-btn" id="regionEvolutionBtn">Voir l'evolution de la region</button>
       <div class="evolution-chart" id="regionChart" style="display:none"></div>
-    </div>
-  </div>
-
-  <div class="layout">
-    <div class="results-wrap" id="resultsWrap">
-      <p class="empty">Cherche un code postal pour afficher les stations.</p>
-    </div>
-    <div class="details" id="details">
-      <p class="empty">Selectionne une station dans la liste pour voir ses prix et son evolution.</p>
     </div>
   </div>
 
