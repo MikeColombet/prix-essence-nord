@@ -21,9 +21,9 @@ site that a GitHub Action regenerates and publishes via GitHub Pages every
   - `index.html` — postal-code search only. No averages, no comparison —
     that's deliberately not this page's job (see below).
   - `comparaison.html` — current national average (+ its evolution), and
-    two sortable-by-code tables (régions, départements) each showing every
+    a département table (sorted by code, sticky header) showing every
     fuel's price with a cheaper/pricier-than-national indicator. Click a
-    row for that département/région's evolution chart.
+    row for that département's evolution chart.
 
 There is no build system, package manager, linter, or test suite — this is
 intentional; treat "no dependencies" as a constraint to preserve, not a gap
@@ -113,37 +113,47 @@ superimposed those on a station's chart for comparison; removed as unwanted
 complexity, then the whole averages concept was later moved off this page
 entirely).
 
-**`comparaison.html` embeds `NOMS_DEPARTEMENTS`, and the *current* average
-per fuel at each level (`deptLatest`, `regionLatest`, `nationalLatest`),
-plus the *historical* `regionSeries`/`nationalSeries`.** Unlike per-station
-data, series size is bounded by *calendar days* not station count (see
-below) — at only 13 regions + 1 national series, cheap enough to embed
-directly. `dept_avg/{dept}.json.gz` (a département's own historical series)
-stays chunked/lazy (`ensureAvgLoaded()` → `avgCache`) since there are 95 of
-them — fetched only when its table row is clicked.
+**`comparaison.html` embeds `NOMS_DEPARTEMENTS`, the *current* average per
+fuel at both levels (`deptLatest`, `nationalLatest`), and the *historical*
+`nationalSeries`.** Unlike per-station data, series size is bounded by
+*calendar days* not station count (see below) — one national series is
+cheap enough to embed directly. `dept_avg/{dept}.json.gz` (a département's
+own historical series) stays chunked/lazy (`ensureAvgLoaded()` →
+`avgCache`) since there are 95 of them — fetched only when its table row is
+clicked.
 
-Both region and département tables are built by iterating
-`Object.keys(NOMS_DEPARTEMENTS)`/`regionLatest` client-side, one `<tr>` per
-entry; each fuel cell (`fuelCell()`) compares that row's average against
-`nationalLatest[fuel]` via `indicatorFor()` (▼ green if cheaper, ▲ red if
-pricier, nothing if within 0.0005€). Clicking any row (`.cmp-row`) loads/
-renders that département's or région's series into a single shared
-`#evolutionDetail` panel below both tables — not a chart per row.
+The département table is built by iterating `Object.keys(NOMS_DEPARTEMENTS)`
+client-side (sorted, which is also numeric order since every code is a
+2-digit zero-padded string), one `<tr>` per département; each fuel cell
+(`fuelCell()`) compares that row's average against `nationalLatest[fuel]`
+via `indicatorFor()` (▼ green if cheaper, ▲ red if pricier, nothing if
+within 0.0005€). Clicking a row (`.cmp-row`) loads/renders that
+département's series into a shared `#evolutionDetail` panel below the
+table — not a chart per row. The table sits in a `.table-scroll` container
+with `max-height: 75vh; overflow: auto` and `th { position: sticky; top: 0 }`
+so the header stays visible while scrolling through all 95 rows — this
+requires the scroll context to be that container itself (not the page),
+which is why it has a bounded height rather than relying on page-level
+scroll (position:sticky relative to an ancestor with default overflow
+wouldn't reliably pin to the viewport).
 
 **Average series (`average_series()` in `build_site.py`) is grouping-agnostic
-— same function computes département, region, and national.** For whatever
-set of `(station_id, carburant, prix_eur, maj_officielle)` rows it's given,
-it computes one point per calendar day where at least one included station
-changed price: the average of each station's latest known price as of that
-day (forward-filled between changes, i.e. a step function). Called once per
-département (that département's own rows from `process_all_departments()`)
-for `dept_avg/{dept}.json.gz`; region/national series are then obtained by
-`merge_series()` — combining already-computed small département series
-(weighted by station count) rather than ever re-touching raw rows, see that
-function's docstring. Latest (non-historical) averages use the analogous
-`grouped_latest_averages()`, parameterized by a `group_for_cp(cp) -> key`
-callback (département code, region name via a `dept_to_region` map built
-in `main()`, or a constant for the national bucket).
+— the same function would compute a region- or arbitrary-group series if
+ever needed again** (a region breakdown existed before and was removed as
+unwanted UI complexity, but the aggregation code stayed general-purpose
+since there was no reason to special-case it back to département-only).
+For whatever set of `(station_id, carburant, prix_eur, maj_officielle)`
+rows it's given, it computes one point per calendar day where at least one
+included station changed price: the average of each station's latest known
+price as of that day (forward-filled between changes, i.e. a step
+function). Called once per département (that département's own rows from
+`process_all_departments()`) for `dept_avg/{dept}.json.gz`; the national
+series is then obtained by `merge_series()` — combining the already-computed
+small département series (weighted by station count) rather than ever
+re-touching raw rows, see that function's docstring. Latest
+(non-historical) averages use the analogous `grouped_latest_averages()`,
+parameterized by a `group_for_cp(cp) -> key` callback (département code, or
+a constant for the national bucket).
 
 **HTML generation is template substitution, not a template engine.** Each
 of `HTML_TEMPLATE` / `HTML_TEMPLATE_COMPARE` is a Python string with
@@ -153,9 +163,9 @@ Plotly.js loaded from a CDN (`plotly.js-dist-min`) with no bundler. All
 UI/search/chart/table logic is inline `<script>` in the templates — edit
 the Python string constants directly.
 
-**Adding/removing a département.** Edit the `departements` (and `regions`,
-if needed) objects in `config.json` (2-digit code → display name), clear
-`stations.csv`, `data/`, `stations/`, `dept_avg/`, then rerun both scripts.
+**Adding/removing a département.** Edit the `departements` object in
+`config.json` (2-digit code → display name), clear `stations.csv`, `data/`,
+`stations/`, `dept_avg/`, then rerun both scripts.
 
 ## CI/CD
 

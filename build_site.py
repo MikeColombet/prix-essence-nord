@@ -8,11 +8,12 @@ Corse suivie comme un seul departement "20") :
 - index.html — uniquement la recherche par code postal. Tape un code
   postal, la liste des stations de son departement s'affiche, clique sur
   une station pour voir ses prix actuels et son evolution. Aucune moyenne
-  departement/region/national ici : voir comparaison.html.
-- comparaison.html — moyenne nationale actuelle (+ son evolution), et deux
-  tableaux (regions, departements par numero) avec le prix de chaque
+  departement/national ici : voir comparaison.html.
+- comparaison.html — moyenne nationale actuelle (+ son evolution), et un
+  tableau des departements (tries par numero) avec le prix de chaque
   carburant et un indicateur moins cher/plus cher que la moyenne nationale.
-  Clique une ligne pour afficher son evolution.
+  Clique une ligne pour afficher son evolution. L'en-tete du tableau reste
+  visible pendant le defilement (colonne collante).
 
 Aucune des deux pages n'embarque les donnees de station : elles sont
 chargees a la demande, par departement (stations/{dept}.json.gz,
@@ -78,8 +79,8 @@ def process_all_departments(data_dir):
     premiere version de ce script (tue par manque de memoire). Ici, la
     memoire de pointe ne depend jamais que de la taille d'UN departement
     (au plus quelques centaines de milliers de lignes), jamais de la France
-    entiere. Les moyennes regionale/nationale sont ensuite obtenues par
-    fusion des series (petites, quelques milliers de points) via
+    entiere. La moyenne nationale est ensuite obtenue par fusion des series
+    departementales (petites, quelques milliers de points) via
     merge_series() plutot qu'en refusionnant les lignes brutes — voir sa
     docstring.
 
@@ -349,7 +350,7 @@ HTML_TEMPLATE = """<!doctype html>
   comme un seul departement, son code postal ne distinguant pas 2A/2B).</p>
   <div class="meta">__NB_STATIONS__ station(s) suivies sur __NB_DEPARTEMENTS__ departement(s) &middot; page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
 
-  <a class="nav-link" href="comparaison.html">Comparer les prix par departement / region / national &rarr;</a>
+  <a class="nav-link" href="comparaison.html">Comparer les prix par departement / national &rarr;</a>
 
   <div class="search-wrap">
     <label for="cpInput">Code postal :</label>
@@ -620,10 +621,10 @@ HTML_TEMPLATE_COMPARE = """<!doctype html>
   }
   .evolution-btn:hover { background: #f5f6f8; }
   .evolution-chart { margin-top: 12px; min-height: 380px; }
-  .table-scroll { overflow-x: auto; }
+  .table-scroll { overflow: auto; max-height: 75vh; }
   table.cmp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; white-space: nowrap; }
   table.cmp-table th, table.cmp-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid #eee; }
-  table.cmp-table th { color: #6b6b70; font-weight: 600; }
+  table.cmp-table th { color: #6b6b70; font-weight: 600; position: sticky; top: 0; background: #fff; z-index: 1; }
   table.cmp-table tbody tr { cursor: pointer; }
   table.cmp-table tbody tr:hover { background: #f5f6f8; }
   table.cmp-table tbody tr.selected { background: #eaf2ff; }
@@ -640,7 +641,7 @@ HTML_TEMPLATE_COMPARE = """<!doctype html>
 </head>
 <body>
   <h1>Comparaison des prix des carburants - France</h1>
-  <p class="description">Moyenne nationale actuelle, et prix moyen par region et par departement, avec un
+  <p class="description">Moyenne nationale actuelle, et prix moyen par departement, avec un
   indicateur (&#9660; moins cher, &#9650; plus cher) par rapport a la moyenne nationale de chaque carburant.
   Clique une ligne pour voir son evolution dans le temps.</p>
   <div class="meta">page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
@@ -652,16 +653,6 @@ HTML_TEMPLATE_COMPARE = """<!doctype html>
     <div class="cards" id="nationalAvgCards"></div>
     <button type="button" class="evolution-btn" id="nationalEvolutionBtn">Voir l'evolution nationale</button>
     <div class="evolution-chart" id="nationalChart" style="display:none"></div>
-  </div>
-
-  <div class="panel">
-    <h2 class="section-title">Par region</h2>
-    <div class="table-scroll">
-      <table class="cmp-table" id="regionTable">
-        <thead><tr id="regionTableHead"></tr></thead>
-        <tbody id="regionTableBody"></tbody>
-      </table>
-    </div>
   </div>
 
   <div class="panel">
@@ -682,8 +673,6 @@ HTML_TEMPLATE_COMPARE = """<!doctype html>
 <script>
 const NOMS_DEPARTEMENTS = __NOMS_DEPARTEMENTS__;
 const deptLatest = __DEPT_LATEST__;
-const regionLatest = __REGION_LATEST__;
-const regionSeries = __REGION_SERIES__;
 const nationalLatest = __NATIONAL_LATEST__;
 const nationalSeries = __NATIONAL_SERIES__;
 
@@ -758,7 +747,7 @@ function renderAvgCards(container, avgs) {
 
 renderAvgCards(document.getElementById('nationalAvgCards'), nationalLatest);
 
-// Graphique d'evolution d'un niveau (departement, region ou national) : ses
+// Graphique d'evolution d'un niveau (departement ou national) : ses
 // propres tendances uniquement.
 function renderSeriesChart(divId, seriesByFuel) {
   const el = document.getElementById(divId);
@@ -829,28 +818,15 @@ function buildHeadRow(firstLabel) {
 }
 
 document.getElementById('deptTableHead').innerHTML = '<th>N&deg;</th>' + buildHeadRow('Departement');
-document.getElementById('regionTableHead').innerHTML = buildHeadRow('Region');
 
 const deptTableBody = document.getElementById('deptTableBody');
 Object.keys(NOMS_DEPARTEMENTS).sort().forEach(dept => {
   const cells = fuelsAvailable.map(f => fuelCell(deptLatest[dept], f)).join('');
   const tr = document.createElement('tr');
   tr.className = 'cmp-row';
-  tr.dataset.type = 'dept';
-  tr.dataset.key = dept;
+  tr.dataset.dept = dept;
   tr.innerHTML = `<td>${dept}</td><td>${NOMS_DEPARTEMENTS[dept]}</td>${cells}`;
   deptTableBody.appendChild(tr);
-});
-
-const regionTableBody = document.getElementById('regionTableBody');
-Object.keys(regionLatest).sort().forEach(region => {
-  const cells = fuelsAvailable.map(f => fuelCell(regionLatest[region], f)).join('');
-  const tr = document.createElement('tr');
-  tr.className = 'cmp-row';
-  tr.dataset.type = 'region';
-  tr.dataset.key = region;
-  tr.innerHTML = `<td>${region}</td>${cells}`;
-  regionTableBody.appendChild(tr);
 });
 
 const evolutionDetail = document.getElementById('evolutionDetail');
@@ -861,25 +837,18 @@ document.querySelectorAll('.cmp-row').forEach(row => {
   row.addEventListener('click', async () => {
     document.querySelectorAll('.cmp-row').forEach(r => r.classList.remove('selected'));
     row.classList.add('selected');
-    const type = row.dataset.type;
-    const key = row.dataset.key;
+    const dept = row.dataset.dept;
 
     evolutionDetail.style.display = 'block';
-    evolutionDetailTitle.textContent = type === 'dept'
-      ? `Evolution - ${key} ${NOMS_DEPARTEMENTS[key]}`
-      : `Evolution - ${key}`;
+    evolutionDetailTitle.textContent = `Evolution - ${dept} ${NOMS_DEPARTEMENTS[dept]}`;
     evolutionDetailChart.innerHTML = '<p class="empty">Chargement...</p>';
 
     let series;
-    if (type === 'region') {
-      series = regionSeries[key] || {};
-    } else {
-      try {
-        series = await ensureAvgLoaded(key);
-      } catch (e) {
-        evolutionDetailChart.innerHTML = `<p class="empty">${e.message}</p>`;
-        return;
-      }
+    try {
+      series = await ensureAvgLoaded(dept);
+    } catch (e) {
+      evolutionDetailChart.innerHTML = `<p class="empty">${e.message}</p>`;
+      return;
     }
     renderSeriesChart('evolutionDetailChart', series);
     evolutionDetail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -894,8 +863,6 @@ document.querySelectorAll('.cmp-row').forEach(row => {
 def main():
     config = load_config()
     departements = config["departements"]
-    regions = config["regions"]
-    dept_to_region = {d: region for region, depts in regions.items() for d in depts}
     stations_path = os.path.join(BASE_DIR, config["stations_filename"])
     data_dir = os.path.join(BASE_DIR, config["data_dir"])
     stations_dir = os.path.join(BASE_DIR, config["stations_dir"])
@@ -916,16 +883,9 @@ def main():
 
     write_dept_avg_chunks(dept_avg_dir, dept_series_by_dept)
 
-    region_series_by_region = {
-        region: merge_series([dept_series_by_dept[d] for d in depts if d in dept_series_by_dept])
-        for region, depts in regions.items()
-    }
     national_series = merge_series(list(dept_series_by_dept.values()))
 
     dept_latest = grouped_latest_averages(latest, stations_by_id, lambda cp: cp[:2] or None)
-    region_latest = grouped_latest_averages(
-        latest, stations_by_id, lambda cp: dept_to_region.get(cp[:2])
-    )
     national_latest_grouped = grouped_latest_averages(
         latest, stations_by_id, lambda cp: "national" if cp[:2] else None
     )
@@ -947,10 +907,6 @@ def main():
         "__NOMS_DEPARTEMENTS__", json.dumps(departements, ensure_ascii=False)
     )
     html_compare = html_compare.replace("__DEPT_LATEST__", json.dumps(dept_latest, ensure_ascii=False))
-    html_compare = html_compare.replace("__REGION_LATEST__", json.dumps(region_latest, ensure_ascii=False))
-    html_compare = html_compare.replace(
-        "__REGION_SERIES__", json.dumps(region_series_by_region, ensure_ascii=False)
-    )
     html_compare = html_compare.replace("__NATIONAL_LATEST__", json.dumps(national_latest, ensure_ascii=False))
     html_compare = html_compare.replace("__NATIONAL_SERIES__", json.dumps(national_series, ensure_ascii=False))
     html_compare = html_compare.replace("__GENERATED__", generated)

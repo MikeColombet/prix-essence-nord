@@ -4,10 +4,10 @@ Deux pages statiques, générées à partir des mêmes données, chacune avec un
 objectif unique :
 - `index.html` — recherche de stations par code postal : prix actuels et
   évolution sur 10 ans d'une station.
-- `comparaison.html` — moyenne nationale actuelle (et son évolution), et
-  deux tableaux (régions, départements par numéro) avec le prix de chaque
-  carburant et un indicateur moins cher/plus cher que la moyenne nationale ;
-  clique une ligne pour voir son évolution.
+- `comparaison.html` — moyenne nationale actuelle (et son évolution), et un
+  tableau des départements (triés par numéro, en-tête figé au défilement)
+  avec le prix de chaque carburant et un indicateur moins cher/plus cher
+  que la moyenne nationale ; clique une ligne pour voir son évolution.
 
 Couvre la France métropolitaine (95 départements — la Corse est suivie
 comme un seul département « 20 », son code postal ne distinguant pas
@@ -46,12 +46,12 @@ GitHub Pages sert déjà le site en https.
   dans `index.html`.
 - `dept_avg/{dept}.json.gz` — moyenne historique d'un département par
   carburant, chargée à la demande depuis `comparaison.html` quand tu cliques
-  sur une ligne du tableau des départements. Les moyennes régionale et
-  nationale sont assez petites (une valeur par jour, pas par station) pour
-  être embarquées directement dans `comparaison.html`, non compressées.
+  sur une ligne du tableau des départements. La moyenne nationale est assez
+  petite (une valeur par jour, pas par station) pour être embarquée
+  directement dans `comparaison.html`, non compressée.
 - `index.html` — la page de recherche par code postal (page d'accueil du
   dépôt / de GitHub Pages).
-- `comparaison.html` — la page de comparaison département / région / national.
+- `comparaison.html` — la page de comparaison département / national.
 
 ## Pourquoi compresser, et pourquoi une seule copie des prix
 
@@ -94,8 +94,8 @@ python3 -m http.server     # sert le site en local (necessaire, voir plus haut)
 Ouvre ensuite `http://localhost:8000/`, tape un code postal (au moins les 2
 premiers chiffres) pour voir les stations du département, puis clique sur
 une station pour voir ses prix actuels et son évolution. Depuis cette page,
-un lien mène à `comparaison.html` pour comparer les prix par département,
-région et national.
+un lien mène à `comparaison.html` pour comparer les prix par département
+et national.
 
 À prévoir au premier lancement : `collect_prices.py` télécharge 10 archives
 annuelles complètes de la France (~10-35 Mo chacune, zip), traitées une par
@@ -113,18 +113,18 @@ un import ponctuel, les mises à jour suivantes (`--maj-seulement`) sont rapides
 - Relance `python3 build_site.py` après chaque mise à jour de `data/` /
   `stations.csv` pour que le site reflète les nouvelles données.
 
-## Comparaison département / région / nationale (`comparaison.html`)
+## Comparaison département / nationale (`comparaison.html`)
 
 En haut de la page : la moyenne nationale actuelle de chaque carburant (sur
 l'ensemble des départements suivis), avec un bouton « Voir l'évolution »
 (graphique indépendant, pas superposé à une station).
 
-En dessous, deux tableaux — régions puis départements (triés par numéro) —
-avec le prix moyen actuel de chaque carburant et un indicateur (▼ vert =
-moins cher, ▲ rouge = plus cher) par rapport à la moyenne nationale de ce
-carburant. Clique une ligne pour afficher son évolution dans le temps
-(région : déjà en mémoire ; département : chargé à la demande depuis
-`dept_avg/{dept}.json.gz`).
+En dessous, un tableau des départements (triés par numéro, en-tête de
+colonnes figé au défilement pour rester lisible sur les 95 lignes) avec le
+prix moyen actuel de chaque carburant et un indicateur (▼ vert = moins cher,
+▲ rouge = plus cher) par rapport à la moyenne nationale de ce carburant.
+Clique une ligne pour afficher son évolution dans le temps (chargée à la
+demande depuis `dept_avg/{dept}.json.gz`).
 
 ## Automatiser la collecte (macOS, optionnel)
 
@@ -153,9 +153,9 @@ Confidentialité et sécurité > Accès complet au disque.
 
 ## Ajouter ou retirer un département
 
-Édite l'objet `"departements"` (et `"regions"` si besoin) dans `config.json`
-(clé = code département sur 2 chiffres, valeur = nom affiché). Supprime
-`stations.csv` et le contenu de `data/`, `stations/` et `dept_avg/`, puis
+Édite l'objet `"departements"` dans `config.json` (clé = code département
+sur 2 chiffres, valeur = nom affiché). Supprime `stations.csv` et le
+contenu de `data/`, `stations/` et `dept_avg/`, puis
 relance `collect_prices.py` et `build_site.py`.
 
 ## Autres carburants
