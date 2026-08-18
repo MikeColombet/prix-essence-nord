@@ -334,6 +334,14 @@ HTML_TEMPLATE = """<!doctype html>
   }
   #franceMap { width: 100%; height: 420px; }
   @media (max-width: 600px) { #franceMap { height: 360px; } .map-wrap { max-width: none; } }
+  .map-warning {
+    background: #fff3cd; color: #7a5b00; border-radius: 8px; padding: 8px 12px;
+    font-size: 0.82rem; margin-bottom: 10px;
+  }
+  .map-warning button {
+    margin-left: 8px; font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid #d8ae00; background: #fff; cursor: pointer;
+  }
   .station-map-wrap { margin-bottom: 16px; }
   #stationMap { width: 100%; height: 220px; border-radius: 8px; overflow: hidden; }
   .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
@@ -437,15 +445,29 @@ function escapeHtml(s) {
 // dependance) les decompresse a la volee. Necessite d'etre servi en http(s)
 // (GitHub Pages ou `python3 -m http.server` en local) : fetch() ne peut pas
 // lire de fichier local via file://.
-async function fetchGzipJson(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+// Reessaie quelques fois avant d'abandonner : avec la carte qui declenche
+// jusqu'a 95 requetes en parallele (une par departement, voir
+// ensureAllStationsLoaded), un blip reseau ponctuel sur une seule d'entre
+// elles ne doit pas faire disparaitre silencieusement tout un departement
+// de la carte.
+async function fetchGzipJson(url, retries = 2) {
   if (typeof DecompressionStream === 'undefined') {
     throw new Error("ce navigateur ne supporte pas DecompressionStream (mets-le a jour)");
   }
-  const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
-  const text = await new Response(stream).text();
-  return JSON.parse(text);
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+      const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
+      const text = await new Response(stream).text();
+      return JSON.parse(text);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 const stationsCache = new Map();
@@ -469,13 +491,28 @@ async function ensureHistoryLoaded(sid, dept) {
 // d'un seul departement : on reutilise simplement ensureStationsLoaded()
 // sur chaque departement en parallele (memes chunks, meme cache) plutot que
 // de generer un fichier France entiere supplementaire qui dupliquerait ces
-// memes donnees sur le disque.
+// memes donnees sur le disque. Si un departement echoue meme apres les
+// reessais de fetchGzipJson, on l'exclut (plutot que de faire echouer toute
+// la carte) mais on garde la liste des echecs pour prevenir l'utilisateur
+// et lui permettre de reessayer, plutot que de laisser des stations
+// manquer silencieusement sur la carte.
 let allStationsPromise = null;
+let allStationsFailedDepts = [];
 function ensureAllStationsLoaded() {
   if (!allStationsPromise) {
+    allStationsFailedDepts = [];
     allStationsPromise = Promise.all(
-      Object.keys(NOMS_DEPARTEMENTS).map(d => ensureStationsLoaded(d).catch(() => []))
-    ).then(lists => lists.flat());
+      Object.keys(NOMS_DEPARTEMENTS).map(d =>
+        ensureStationsLoaded(d).catch(() => { allStationsFailedDepts.push(d); return []; })
+      )
+    ).then(lists => {
+      if (allStationsFailedDepts.length) {
+        // Ne pas mettre en cache un resultat partiel : un reessai
+        // (bouton "Reessayer") refera une tentative complete.
+        allStationsPromise = null;
+      }
+      return lists.flat();
+    });
   }
   return allStationsPromise;
 }
@@ -522,6 +559,10 @@ modeTabMap.addEventListener('click', async () => {
   clearResults();
 
   if (mapRendered) return;
+  await loadAndRenderMap();
+});
+
+async function loadAndRenderMap() {
   let allStations;
   try {
     allStations = await ensureAllStationsLoaded();
@@ -531,7 +572,30 @@ modeTabMap.addEventListener('click', async () => {
   }
   await renderFranceMap(allStations);
   mapRendered = true;
-});
+  if (allStationsFailedDepts.length) {
+    showMapLoadWarning(allStationsFailedDepts.length);
+  }
+}
+
+// Un departement qui echoue meme apres reessai (fetchGzipJson) ne doit pas
+// faire disparaitre silencieusement ses stations de la carte : on previent
+// et on propose de reessayer (juste ce qui manque, via
+// ensureAllStationsLoaded qui refait une tentative complete puisque son
+// cache a ete invalide en cas d'echec partiel).
+function showMapLoadWarning(n) {
+  const mapEl = document.getElementById('franceMap');
+  const warn = document.createElement('div');
+  warn.className = 'map-warning';
+  warn.innerHTML = `${n} departement(s) n'ont pas pu etre charges sur la carte (reseau). ` +
+    `<button type="button" id="retryMapLoad">Reessayer</button>`;
+  mapEl.parentElement.insertBefore(warn, mapEl);
+  document.getElementById('retryMapLoad').addEventListener('click', async () => {
+    warn.remove();
+    mapRendered = false;
+    mapEl.innerHTML = '<p class="empty">Chargement des stations...</p>';
+    await loadAndRenderMap();
+  });
+}
 
 async function renderFranceMap(stations) {
   const el = document.getElementById('franceMap');
@@ -889,15 +953,25 @@ function escapeHtml(s) {
 // Chaque chunk de donnees est un petit fichier JSON gzippe : fetch() recupere
 // les octets bruts, DecompressionStream (API native du navigateur, aucune
 // dependance) les decompresse a la volee. Necessite d'etre servi en http(s).
-async function fetchGzipJson(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+// Reessaie quelques fois avant d'abandonner (blip reseau ponctuel).
+async function fetchGzipJson(url, retries = 2) {
   if (typeof DecompressionStream === 'undefined') {
     throw new Error("ce navigateur ne supporte pas DecompressionStream (mets-le a jour)");
   }
-  const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
-  const text = await new Response(stream).text();
-  return JSON.parse(text);
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+      const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
+      const text = await new Response(stream).text();
+      return JSON.parse(text);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 const avgCache = new Map();
