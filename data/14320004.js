@@ -1,2 +1,0 @@
-window.STATION_HISTORY_DATA = window.STATION_HISTORY_DATA || {};
-window.STATION_HISTORY_DATA["14320004"] = [{"carburant": "Gazole", "prix_eur": "2.250", "maj_officielle": "2026-08-14 09:08:16"}, {"carburant": "Gazole", "prix_eur": "2.25", "maj_officielle": "2026-08-12T16:26:06"}, {"carburant": "Gazole", "prix_eur": "2.25", "maj_officielle": "2026-08-14T09:08:16"}, {"carburant": "E10", "prix_eur": "1.99", "maj_officielle": "2026-08-12T16:26:06"}, {"carburant": "E10", "prix_eur": "1.99", "maj_officielle": "2026-08-14T09:08:16"}];

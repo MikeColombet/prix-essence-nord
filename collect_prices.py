@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 Recupere et met a jour les prix des carburants de toutes les stations des
-departements configures (par defaut : Hauts-de-France, Normandie, Grand Est,
-Ile-de-France, soit 28 departements).
+departements configures (par defaut : France metropolitaine, 95 departements
+— la Corse est suivie comme un seul departement "20" car son code postal ne
+distingue pas 2A/2B).
 
 Usage :
     python3 collect_prices.py            -> collecte complete (roster + historique
@@ -16,17 +17,24 @@ Usage :
 Sources officielles : voir https://www.prix-carburants.gouv.fr/rubrique/opendata/
 Le nom et la marque des stations ne font pas partie des donnees publiques.
 
-Les prix sont stockes dans un fichier CSV par departement (prix/{dept}.csv)
-plutot qu'un seul fichier global : avec ~28 departements et plusieurs annees
-d'historique, un fichier unique grossirait au point de risquer de depasser la
-limite de taille de fichier de GitHub. Un fichier par departement reste petit
-indefiniment (croissance proportionnelle au nombre de stations de CE
-departement, pas de l'ensemble des regions suivies).
+Stockage : un fichier compresse par station, data/{dept}/{station_id}.json.gz,
+contenant tout son historique (ex: [["Gazole","1.827","2019-03-02T08:00:00"], ...]).
+C'est la SEULE copie des prix (pas de CSV plat en parallele) : a l'echelle de
+toute la France sur 10 ans, dupliquer les donnees dans deux formats doublerait
+inutilement la taille du depot. Le format compact (tableaux, pas d'objets a
+cles repetees) + gzip reduit encore la taille sur disque d'un facteur ~5-8
+par rapport a du CSV/JSON verbeux non compresse.
+
+Une archive annuelle est traitee en flux (iterparse) : chaque station
+rencontree est fusionnee immediatement dans son fichier sur disque, sans
+jamais accumuler l'annee entiere (~plusieurs millions de lignes pour la
+France) en memoire.
 
 Ce script ne depend d'aucune librairie externe (bibliotheque standard Python 3
-uniquement).
+uniquement : gzip et json compris).
 """
 import csv
+import gzip
 import io
 import json
 import os
@@ -42,7 +50,6 @@ FLUX_URL = "https://donnees.roulez-eco.fr/opendata/instantane"
 ANNEE_URL = "https://donnees.roulez-eco.fr/opendata/annee"
 
 STATIONS_FIELDS = ["station_id", "adresse", "ville", "cp", "latitude", "longitude"]
-PRIX_FIELDS = ["station_id", "carburant", "prix_eur", "maj_officielle"]
 
 
 def load_config():
@@ -88,7 +95,7 @@ def download_year(year=None):
     """Archive annuelle (toute la France) : stock de l'annee en cours si
     year=None, sinon archive complete de l'annee demandee (depuis 2007)."""
     url = ANNEE_URL if year is None else f"{ANNEE_URL}/{year}"
-    return _http_get_zip_xml(url, timeout=180)
+    return _http_get_zip_xml(url, timeout=300)
 
 
 def _station_meta_from_elem(elem):
@@ -101,14 +108,19 @@ def _station_meta_from_elem(elem):
     }
 
 
+def _pdv_department(cp):
+    """Departement d'un code postal : 2 premiers chiffres, sauf la Corse
+    (20000-20999) regroupee sous le code "20" (le code postal seul ne
+    distingue pas 2A/2B)."""
+    return cp[:2] if cp else ""
+
+
 def _extract_pdv(elem, departements):
-    """Retourne (station_id, meta, prix_rows) pour un element <pdv> dont le
-    departement (2 premiers chiffres du cp) fait partie de ceux suivis,
-    sinon None. Chaque ligne de prix porte un champ transitoire
-    "departement" utilise pour repartir les lignes dans le bon fichier
-    prix/{dept}.csv (jamais ecrit tel quel dans le CSV final)."""
+    """Retourne (station_id, meta, departement, lignes_prix) pour un element
+    <pdv> dont le departement fait partie de ceux suivis, sinon None.
+    lignes_prix : liste de (carburant, prix_eur, maj_officielle)."""
     cp = (elem.get("cp") or "").strip()
-    dept = cp[:2]
+    dept = _pdv_department(cp)
     if dept not in departements:
         return None
     sid = elem.get("id")
@@ -119,51 +131,106 @@ def _extract_pdv(elem, departements):
         maj = prix.get("maj")
         if not valeur or not maj:
             continue
-        price_rows.append(
-            {
-                "station_id": sid,
-                "carburant": prix.get("nom"),
-                "prix_eur": valeur,
-                "maj_officielle": maj,
-                "departement": dept,
-            }
-        )
-    return sid, meta, price_rows
+        price_rows.append((prix.get("nom"), valeur, maj))
+    return sid, meta, dept, price_rows
 
 
-def discover_current(departements):
-    """Parcourt le flux instantane (toute la France, ~1 Mo compresse) et
-    conserve les stations des departements suivis. Retourne (meta_par_id,
-    lignes_prix)."""
+def merge_meta(target, sid, meta):
+    """Fusionne les metadonnees d'une station : on complete les champs vides,
+    sans ecraser une valeur deja connue par une chaine vide."""
+    if sid not in target:
+        target[sid] = dict(meta)
+    else:
+        for k, v in meta.items():
+            if v and not target[sid].get(k):
+                target[sid][k] = v
+
+
+def history_path(data_dir, dept, sid):
+    return os.path.join(data_dir, dept, f"{sid}.json.gz")
+
+
+def read_station_history(path):
+    """Lit l'historique compresse d'une station : liste de
+    [carburant, prix_eur, maj_officielle], triee chronologiquement.
+    Liste vide si le fichier n'existe pas encore."""
+    if not os.path.exists(path):
+        return []
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_station_history(path, entries):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(entries, f, separators=(",", ":"), ensure_ascii=False)
+
+
+def merge_station_history(path, new_rows):
+    """Fusionne new_rows (carburant, prix_eur, maj_officielle) dans
+    l'historique existant d'une station (dedoublonnage sur
+    carburant+maj_officielle), reecrit le fichier trie chronologiquement.
+    Ne touche pas au disque si aucune ligne n'est reellement nouvelle.
+    Retourne le nombre de lignes ajoutees."""
+    existing = read_station_history(path)
+    existing_keys = {(e[0], e[2]) for e in existing}
+    to_add = []
+    seen = set()
+    for carburant, prix_eur, maj in new_rows:
+        key = (carburant, maj)
+        if key in existing_keys or key in seen:
+            continue
+        seen.add(key)
+        to_add.append([carburant, prix_eur, maj])
+
+    if not to_add:
+        return 0
+
+    merged = existing + to_add
+    merged.sort(key=lambda e: e[2])
+    write_station_history(path, merged)
+    return len(to_add)
+
+
+def ingest_pdv_stream(root_iter, departements, data_dir, meta_all):
+    """Parcourt un flux d'elements <pdv> (root.findall ou iterparse) et
+    fusionne immediatement chaque station rencontree dans son fichier
+    data/{dept}/{id}.json.gz — jamais d'accumulation de l'ensemble des
+    lignes en memoire, meme pour une grosse archive annuelle. Retourne le
+    nombre de stations vues et le nombre de lignes de prix ajoutees."""
+    n_stations = 0
+    n_rows_added = 0
+    for elem in root_iter:
+        result = _extract_pdv(elem, departements)
+        if result is not None:
+            sid, meta, dept, rows = result
+            merge_meta(meta_all, sid, meta)
+            n_stations += 1
+            if rows:
+                path = history_path(data_dir, dept, sid)
+                n_rows_added += merge_station_history(path, rows)
+        elem.clear()
+    return n_stations, n_rows_added
+
+
+def discover_current(departements, data_dir, meta_all):
+    """Flux instantane (toute la France, ~1 Mo compresse)."""
     xml_bytes = download_flux()
     root = ET.fromstring(xml_bytes)
-    meta = {}
-    price_rows = []
-    for pdv in root.findall("pdv"):
-        result = _extract_pdv(pdv, departements)
-        if result is None:
-            continue
-        sid, m, rows = result
-        meta[sid] = m
-        price_rows.extend(rows)
-    return meta, price_rows
+    return ingest_pdv_stream(root.findall("pdv"), departements, data_dir, meta_all)
 
 
-def extract_year_filtered(xml_bytes, departements):
-    """Parcourt une grosse archive annuelle (toute la France) sans tout
-    charger en memoire (iterparse) et ne conserve que les stations des
-    departements suivis. Retourne (meta_par_id, lignes_prix)."""
-    meta = {}
-    price_rows = []
-    for event, elem in ET.iterparse(io.BytesIO(xml_bytes), events=("end",)):
-        if elem.tag == "pdv":
-            result = _extract_pdv(elem, departements)
-            if result is not None:
-                sid, m, rows = result
-                meta[sid] = m
-                price_rows.extend(rows)
-            elem.clear()
-    return meta, price_rows
+def ingest_year_archive(xml_bytes, departements, data_dir, meta_all):
+    """Grosse archive annuelle (toute la France), traitee en flux
+    (iterparse) : chaque station est fusionnee sur disque au fil du
+    parcours, sans jamais retenir l'annee entiere en memoire."""
+
+    def _pdv_iter():
+        for event, elem in ET.iterparse(io.BytesIO(xml_bytes), events=("end",)):
+            if elem.tag == "pdv":
+                yield elem
+
+    return ingest_pdv_stream(_pdv_iter(), departements, data_dir, meta_all)
 
 
 def write_stations_csv(path, stations_meta):
@@ -186,111 +253,23 @@ def write_stations_csv(path, stations_meta):
             )
 
 
-def append_prix_rows(prix_dir, new_rows):
-    """Reparti les lignes de prix par departement et les ajoute a
-    prix/{dept}.csv (dedoublonnage sur station_id + carburant +
-    maj_officielle, comme avant, mais un fichier par departement). Retourne
-    le nombre total de lignes ajoutees."""
-    os.makedirs(prix_dir, exist_ok=True)
-    by_dept = {}
-    for r in new_rows:
-        by_dept.setdefault(r["departement"], []).append(r)
-
-    total_added = 0
-    for dept, dept_rows in by_dept.items():
-        path = os.path.join(prix_dir, f"{dept}.csv")
-        file_exists = os.path.exists(path)
-        existing_keys = set()
-        if file_exists:
-            with open(path, newline="", encoding="utf-8") as f:
-                for row in csv.DictReader(f):
-                    existing_keys.add(
-                        (row["station_id"], row["carburant"], row["maj_officielle"])
-                    )
-
-        to_write = []
-        seen_in_batch = set()
-        for r in dept_rows:
-            key = (r["station_id"], r["carburant"], r["maj_officielle"])
-            if key in existing_keys or key in seen_in_batch:
-                continue
-            seen_in_batch.add(key)
-            to_write.append({k: r[k] for k in PRIX_FIELDS})
-
-        if to_write:
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=PRIX_FIELDS)
-                if not file_exists:
-                    writer.writeheader()
-                writer.writerows(to_write)
-
-        total_added += len(to_write)
-
-    return total_added
-
-
-def merge_meta(target, source):
-    """Fusionne les metadonnees d'une station : on complete les champs vides,
-    sans ecraser une adresse deja connue par une chaine vide."""
-    for sid, m in source.items():
-        if sid not in target:
-            target[sid] = dict(m)
-        else:
-            for k, v in m.items():
-                if v and not target[sid].get(k):
-                    target[sid][k] = v
-
-
-def read_csv_rows(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def build_data_chunks(prix_dir, data_dir):
-    """Regroupe l'ensemble des fichiers prix/{dept}.csv par station et ecrit
-    un petit fichier JS par station (chargement a la demande depuis le site,
-    sans serveur ni probleme de CORS en file://)."""
-    os.makedirs(data_dir, exist_ok=True)
-    by_station = {}
-    if os.path.isdir(prix_dir):
-        for fname in sorted(os.listdir(prix_dir)):
-            if not fname.endswith(".csv"):
-                continue
-            for r in read_csv_rows(os.path.join(prix_dir, fname)):
-                by_station.setdefault(r["station_id"], []).append(
-                    {
-                        "carburant": r["carburant"],
-                        "prix_eur": r["prix_eur"],
-                        "maj_officielle": r["maj_officielle"],
-                    }
-                )
-    for sid, prices in by_station.items():
-        chunk_path = os.path.join(data_dir, f"{sid}.js")
-        payload = json.dumps(prices, ensure_ascii=False)
-        with open(chunk_path, "w", encoding="utf-8") as f:
-            f.write("window.STATION_HISTORY_DATA = window.STATION_HISTORY_DATA || {};\n")
-            f.write(f'window.STATION_HISTORY_DATA["{sid}"] = {payload};\n')
-    return len(by_station)
-
-
 def main():
     config = load_config()
     departements = set(config["departements"].keys())
     stations_path = os.path.join(BASE_DIR, config["stations_filename"])
-    prix_dir = os.path.join(BASE_DIR, config["prix_dir"])
     data_dir = os.path.join(BASE_DIR, config["data_dir"])
 
     maj_seulement = len(sys.argv) > 1 and sys.argv[1] == "--maj-seulement"
 
-    print(f"Telechargement du flux instantane (toute la France, {len(departements)} departement(s) suivis)...")
     meta_all = {}
-    all_new_rows = []
-    current_meta, current_rows = discover_current(departements)
-    merge_meta(meta_all, current_meta)
-    all_new_rows.extend(current_rows)
-    print(f"  {len(current_meta)} station(s) trouvee(s).")
+    total_stations_seen = 0
+    total_rows_added = 0
+
+    print(f"Telechargement du flux instantane (toute la France, {len(departements)} departement(s) suivis)...")
+    n_stations, n_rows = discover_current(departements, data_dir, meta_all)
+    total_stations_seen += n_stations
+    total_rows_added += n_rows
+    print(f"  {n_stations} station(s) vue(s), {n_rows} nouvelle(s) ligne(s) de prix.")
 
     if not maj_seulement:
         current_year = datetime.now().year
@@ -307,19 +286,16 @@ def main():
             except Exception as e:
                 print(f"  Echec du telechargement pour {label} : {e}")
                 continue
-            print("  Extraction des stations des departements suivis...")
-            year_meta, year_rows = extract_year_filtered(xml_bytes, departements)
-            merge_meta(meta_all, year_meta)
-            all_new_rows.extend(year_rows)
-            print(f"  {len(year_rows)} entree(s) de prix extraite(s) pour {label}.")
+            print("  Extraction et fusion des stations des departements suivis...")
+            n_stations, n_rows = ingest_year_archive(xml_bytes, departements, data_dir, meta_all)
+            total_stations_seen += n_stations
+            total_rows_added += n_rows
+            print(f"  {n_stations} station(s) vue(s), {n_rows} nouvelle(s) ligne(s) de prix pour {label}.")
 
     write_stations_csv(stations_path, meta_all)
-    added = append_prix_rows(prix_dir, all_new_rows)
-    n_chunks = build_data_chunks(prix_dir, data_dir)
 
     print(f"\n{len(meta_all)} station(s) dans stations.csv.")
-    print(f"{added} nouvelle(s) ligne(s) de prix ajoutee(s) dans {config['prix_dir']}/.")
-    print(f"{n_chunks} fichier(s) de donnees par station regenere(s) dans {config['data_dir']}/.")
+    print(f"{total_rows_added} nouvelle(s) ligne(s) de prix ajoutee(s) au total dans {config['data_dir']}/.")
     print("\nPense a lancer 'python3 build_site.py' pour regenerer le site si ce n'est pas deja fait.")
 
 

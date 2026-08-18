@@ -1,10 +1,11 @@
-# Recherche des prix essence – Hauts-de-France, Normandie, Grand Est, Île-de-France
+# Recherche des prix essence – France
 
 Site de recherche des stations-service par code postal, avec prix actuels,
 moyennes département / région / nationale par carburant (actuelles et leur
-évolution) et historique par station. Couvre les 28 départements des régions
-Hauts-de-France, Normandie, Grand Est et Île-de-France (voir la liste dans
-`config.json`).
+évolution) et historique par station sur 10 ans. Couvre la France
+métropolitaine (95 départements — la Corse est suivie comme un seul
+département « 20 », son code postal ne distinguant pas 2A/2B ; voir la liste
+complète dans `config.json`).
 
 Le site est mis à jour automatiquement toutes les 12h par une GitHub Action
 et publié via GitHub Pages — voir `GITHUB.md` pour la mise en ligne.
@@ -12,58 +13,82 @@ et publié via GitHub Pages — voir `GITHUB.md` pour la mise en ligne.
 Source des données : flux officiel `donnees.roulez-eco.fr` (même source que
 prix-carburants.gouv.fr), mis à jour côté gouvernement toutes les 10 minutes.
 
+**Important : ce site doit être servi en http(s)**, pas ouvert directement
+depuis le disque (double-clic sur `index.html`). Les données étant
+compressées (voir plus bas), le navigateur les récupère via `fetch()`, qui ne
+peut pas lire de fichier local via `file://`. En local, lance
+`python3 -m http.server` puis ouvre `http://localhost:8000/`. En production,
+GitHub Pages sert déjà le site en https.
+
 ## Fichiers
 
 - `collect_prices.py` — récupère les stations des départements suivis et
-  leur historique de prix, écrit `stations.csv` et `prix/{dept}.csv`.
+  leur historique de prix, écrit `stations.csv` et `data/{dept}/{id}.json.gz`.
 - `build_site.py` — génère `index.html` et les fichiers de données chargés à
-  la demande, à partir de `stations.csv` et `prix/*.csv`.
+  la demande, à partir de `stations.csv` et `data/*/*.json.gz`.
 - `config.json` — paramètres (départements suivis, regroupement par région,
   années d'historique à récupérer).
 - `stations.csv` — une ligne par station (adresse, ville, code postal, coordonnées).
-- `prix/{dept}.csv` — une ligne par relevé de prix (station_id, carburant, prix,
-  date), un fichier par département.
-- `stations/{dept}.js` — liste des stations d'un département avec leurs prix
-  actuels, chargée à la demande quand tu recherches un code postal.
-- `data/{id}.js` — historique complet des prix d'une station, chargé à la
-  demande quand tu la sélectionnes.
-- `dept_avg/{dept}.js` — moyenne historique d'un département par carburant,
-  chargée à la demande quand tu cliques sur « Voir l'évolution du
+- `data/{dept}/{id}.json.gz` — historique complet des prix d'une station
+  (ex: `[["Gazole","1.827","2019-03-02T08:00:00"], ...]`), compressé,
+  chargé à la demande quand tu la sélectionnes. **Seule copie** des prix : il
+  n'y a pas de CSV séparé en plus (voir « Pourquoi compresser » plus bas).
+- `stations/{dept}.json.gz` — liste des stations d'un département avec leurs
+  prix actuels, chargée à la demande quand tu recherches un code postal.
+- `dept_avg/{dept}.json.gz` — moyenne historique d'un département par
+  carburant, chargée à la demande quand tu cliques sur « Voir l'évolution du
   département ». Les moyennes régionale et nationale sont assez petites (une
   valeur par jour, pas par station) pour être embarquées directement dans
-  `index.html`.
+  `index.html`, non compressées.
 - `index.html` — la page de recherche (page d'accueil du dépôt / de GitHub Pages).
 
-Toutes ces données sont chargées à la demande, par département ou par
-station, plutôt que d'un bloc au chargement de la page : avec ~28
-départements suivis, tout embarquer dans `index.html` la rendrait beaucoup
-trop lourde. La page principale ne contient que l'interface de recherche.
+## Pourquoi compresser, et pourquoi une seule copie des prix
 
-Le prix est aussi éclaté en un fichier CSV par département (`prix/{dept}.csv`)
-plutôt qu'un fichier unique : avec plusieurs années d'historique sur ~28
-départements, un fichier unique grossirait au point de risquer de dépasser la
-limite de taille de fichier de GitHub (100 Mo). Un fichier par département
-reste petit indéfiniment.
+À l'échelle d'un seul département sur 2-3 ans, stocker les prix deux fois (un
+CSV à plat + un JSON par station) restait gérable. À l'échelle de toute la
+France sur 10 ans (~13x plus de volume), dupliquer les données doublerait
+inutilement la taille du dépôt. `data/{dept}/{id}.json.gz` est donc la seule
+copie : `collect_prices.py` s'en sert à la fois pour dédupliquer les
+nouvelles lignes et comme source servie au navigateur, et `build_site.py`
+relit ces mêmes fichiers pour calculer les moyennes.
+
+Chaque fichier est en plus :
+- **compact** : tableaux (`["Gazole","1.827","2019-03-02T08:00:00"]`) plutôt
+  que des objets JSON à clés répétées (`{"carburant":"Gazole",...}`) ;
+- **gzippé** : le texte tabulaire très répétitif (identifiants, dates,
+  quelques noms de carburant) compresse typiquement 5 à 8x. Décompression
+  côté navigateur via `DecompressionStream` (API native, aucune dépendance).
+
+Combinés, dédoublonnage + compression permettent de couvrir 13x plus de
+départements et 4x plus d'années tout en gardant une taille de dépôt
+comparable à l'ancienne version (un seul département, CSV/JSON non compressés).
+
+Les prix sont aussi éclatés par département (`data/{dept}/`, un fichier par
+station) plutôt qu'en un ou quelques gros fichiers : ça garde chaque fichier
+petit indéfiniment (croissance proportionnelle au nombre de stations de CE
+département, pas de la France entière), bien loin de la limite de taille de
+fichier de GitHub (100 Mo).
 
 ## Utilisation
 
 ```bash
 cd ~/DataCarb
-python3 collect_prices.py  # 1er lancement : télécharge le flux instantané +
-                            # les archives 2024, 2025 et l'année en cours
-                            # (toute la France, filtré ensuite sur les
-                            # départements suivis)
-python3 build_site.py      # génère/actualise le site
+python3 collect_prices.py  # 1er lancement : telecharge le flux instantane +
+                            # 10 ans d'archives annuelles (toute la France),
+                            # filtre et fusionne station par station
+python3 build_site.py      # genere/actualise le site
+python3 -m http.server     # sert le site en local (necessaire, voir plus haut)
 ```
 
-Ouvre ensuite `index.html` dans un navigateur, tape un code postal (au moins
-les 2 premiers chiffres) pour voir les stations du département, puis clique
-sur une station pour voir ses prix actuels et son évolution.
+Ouvre ensuite `http://localhost:8000/`, tape un code postal (au moins les 2
+premiers chiffres) pour voir les stations du département, puis clique sur
+une station pour voir ses prix actuels et son évolution.
 
-À prévoir au premier lancement : `collect_prices.py` télécharge 3 archives
-annuelles complètes de la France (~10-35 Mo chacune, zip) avant de ne garder
-que les stations des départements suivis — l'essentiel du temps est le
-téléchargement, pas l'extraction. Compte 2 à 5 minutes selon ta connexion.
+À prévoir au premier lancement : `collect_prices.py` télécharge 10 archives
+annuelles complètes de la France (~10-35 Mo chacune, zip), traitées une par
+une en flux (jamais toute une année en mémoire à la fois). Compte plusieurs
+dizaines de minutes selon ta connexion et la puissance de la machine — c'est
+un import ponctuel, les mises à jour suivantes (`--maj-seulement`) sont rapides.
 
 ## Relancer plus tard
 
@@ -72,7 +97,7 @@ téléchargement, pas l'extraction. Compte 2 à 5 minutes selon ta connexion.
 - `python3 collect_prices.py` (sans option) : retélécharge aussi les archives
   configurées dans `config.json` — utile en début d'année suivante pour
   ajouter une nouvelle année, ou si tu changes `annees_passees`.
-- Relance `python3 build_site.py` après chaque mise à jour de `prix/` /
+- Relance `python3 build_site.py` après chaque mise à jour de `data/` /
   `stations.csv` pour que le site reflète les nouvelles données.
 
 ## Moyennes département / région / nationale
@@ -87,8 +112,8 @@ effectivement sélectionnée, pas seulement du code postal tapé.
 
 Chaque niveau a son propre bouton « Voir l'évolution » : clique dessus pour
 afficher son graphique d'évolution (une courbe par carburant, recalculée jour
-par jour à partir de `prix/*.csv`). C'est un graphique indépendant, pas
-superposé à celui d'une station.
+par jour à partir de l'ensemble des fichiers `data/`). C'est un graphique
+indépendant, pas superposé à celui d'une station.
 
 ## Automatiser la collecte (macOS, optionnel)
 
@@ -117,10 +142,10 @@ Confidentialité et sécurité > Accès complet au disque.
 
 ## Ajouter ou retirer un département
 
-Édite l'objet `"departements"` dans `config.json` (clé = code département sur
-2 chiffres, valeur = nom affiché). Supprime `stations.csv`, le contenu de
-`prix/`, `data/`, `stations/` et `dept_avg/`, puis relance `collect_prices.py`
-et `build_site.py`.
+Édite l'objet `"departements"` (et `"regions"` si besoin) dans `config.json`
+(clé = code département sur 2 chiffres, valeur = nom affiché). Supprime
+`stations.csv` et le contenu de `data/`, `stations/` et `dept_avg/`, puis
+relance `collect_prices.py` et `build_site.py`.
 
 ## Autres carburants
 

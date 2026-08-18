@@ -22,7 +22,10 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # La mise a jour rapide (flux instantane seulement) prend quelques
+    # minutes ; un import complet (10 archives annuelles x France entiere,
+    # declenche manuellement) peut prendre bien plus longtemps.
+    timeout-minutes: 180
     steps:
       - name: Recuperer le depot
         uses: actions/checkout@v4
@@ -49,7 +52,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add stations.csv prix data stations dept_avg index.html
+          git add stations.csv data stations dept_avg index.html
           if git diff --cached --quiet; then
             echo "Aucun changement de prix a enregistrer."
           else

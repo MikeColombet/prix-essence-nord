@@ -2,27 +2,36 @@
 # -*- coding: utf-8 -*-
 """
 Construit index.html : un site de recherche de stations-service par code
-postal (Hauts-de-France, Normandie, Grand Est, Ile-de-France). Tape un code
-postal, la liste des stations de son departement s'affiche, clique sur une
-station pour voir ses prix actuels et son evolution. La page affiche aussi
-la moyenne actuelle de chaque carburant (departement, region, national), et
-un bouton "Voir l'evolution" sous chaque niveau ouvre son propre graphique
-d'evolution (independant de la station selectionnee, pas superpose dessus).
+postal, couvrant la France metropolitaine (95 departements, la Corse suivie
+comme un seul departement "20"). Tape un code postal, la liste des stations
+de son departement s'affiche, clique sur une station pour voir ses prix
+actuels et son evolution. La page affiche aussi la moyenne actuelle de
+chaque carburant (departement, region, national), et un bouton "Voir
+l'evolution" sous chaque niveau ouvre son propre graphique d'evolution
+(independant de la station selectionnee, pas superpose dessus).
 
 La page principale ne contient aucune donnee de station ou de prix : elles
-sont chargees a la demande, par departement, depuis stations/{dept}.js,
-dept_avg/{dept}.js et data/{id}.js (generes par ce script et par
-collect_prices.py). Avec ~28 departements suivis, tout charger d'un coup
-rendrait la page d'accueil trop lourde ; le chargement par departement la
-garde legere quel que soit le nombre total de stations suivies.
+sont chargees a la demande, par departement (stations/{dept}.json.gz,
+dept_avg/{dept}.json.gz) ou par station (data/{dept}/{id}.json.gz), generees
+par ce script et par collect_prices.py. A l'echelle de la France entiere sur
+10 ans, tout charger d'un coup rendrait la page d'accueil enorme ; le
+chargement a la demande la garde legere quel que soit le nombre total de
+stations suivies. Chaque fichier est gzippe (le navigateur le decompresse
+via DecompressionStream, une API native, pas de dependance) : ca reduit
+encore la taille transferee/stockee d'un facteur ~5-8 sur ce genre de
+donnees tres repetitives. Consequence : le site doit etre servi en http(s)
+(GitHub Pages, ou `python3 -m http.server` en local) — fetch() ne peut pas
+lire de fichiers locaux via file://, contrairement aux <script src> utilises
+avant ce changement.
 
 Usage : python3 build_site.py
 (a relancer apres chaque python3 collect_prices.py pour refleter les
 nouvelles donnees)
 
-Ne depend d'aucune librairie externe.
+Ne depend d'aucune librairie externe (gzip compris, bibliotheque standard).
 """
 import csv
+import gzip
 import json
 import os
 from datetime import datetime
@@ -43,34 +52,67 @@ def read_csv_rows(path):
         return list(csv.DictReader(f))
 
 
-def read_prix_dir(prix_dir):
-    """Retourne {departement: [lignes de prix]} a partir des fichiers
-    prix/{dept}.csv (un fichier par departement, voir collect_prices.py)."""
-    by_dept = {}
-    if os.path.isdir(prix_dir):
-        for fname in sorted(os.listdir(prix_dir)):
-            if fname.endswith(".csv"):
-                by_dept[fname[:-4]] = read_csv_rows(os.path.join(prix_dir, fname))
-    return by_dept
+def read_gzip_json(path):
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def latest_prices_by_station(prix_rows):
-    """Pour chaque (station, carburant), ne garde que l'entree la plus
-    recente (comparaison textuelle des dates ISO/"AAAA-MM-JJ ..." qui trient
-    correctement dans l'ordre chronologique)."""
-    latest = {}
-    for r in prix_rows:
-        key = (r["station_id"], r["carburant"])
-        cur = latest.get(key)
-        if cur is None or r["maj_officielle"] > cur["maj_officielle"]:
-            latest[key] = r
-    by_station = {}
-    for (sid, carburant), r in latest.items():
-        by_station.setdefault(sid, {})[carburant] = {
-            "prix_eur": r["prix_eur"],
-            "maj_officielle": r["maj_officielle"],
-        }
-    return by_station
+def write_gzip_json(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+
+
+def process_all_departments(data_dir):
+    """Parcourt data/{dept}/*.json.gz departement par departement. Pour
+    chaque departement, calcule sa propre serie de moyennes (average_series)
+    directement a partir de ses lignes, PUIS les libere avant de passer au
+    departement suivant.
+
+    C'est deliberement different d'un simple "tout charger puis tout
+    calculer" : a l'echelle de la France entiere sur 10 ans (~43 millions de
+    lignes), materialiser l'ensemble des lignes dans une seule structure
+    Python (avant meme de commencer les calculs) a fait planter une
+    premiere version de ce script (tue par manque de memoire). Ici, la
+    memoire de pointe ne depend jamais que de la taille d'UN departement
+    (au plus quelques centaines de milliers de lignes), jamais de la France
+    entiere. Les moyennes regionale/nationale sont ensuite obtenues par
+    fusion des series (petites, quelques milliers de points) via
+    merge_series() plutot qu'en refusionnant les lignes brutes — voir sa
+    docstring.
+
+    Retourne (latest_by_station, dept_series_by_dept) :
+    - latest_by_station : {station_id: {carburant: {prix_eur, maj_officielle}}}
+      (dernier prix connu de chaque station, toutes annees confondues)
+    - dept_series_by_dept : {dept: average_series(...)} pour ce departement."""
+    latest_by_station = {}
+    dept_series_by_dept = {}
+    if not os.path.isdir(data_dir):
+        return latest_by_station, dept_series_by_dept
+
+    for dept in sorted(os.listdir(data_dir)):
+        dept_path = os.path.join(data_dir, dept)
+        if not os.path.isdir(dept_path):
+            continue
+        dept_rows = []
+        for fname in os.listdir(dept_path):
+            if not fname.endswith(".json.gz"):
+                continue
+            sid = fname[: -len(".json.gz")]
+            entries = read_gzip_json(os.path.join(dept_path, fname))
+            latest = {}
+            for carburant, prix_eur, maj in entries:
+                cur = latest.get(carburant)
+                if cur is None or maj > cur["maj_officielle"]:
+                    latest[carburant] = {"prix_eur": prix_eur, "maj_officielle": maj}
+                dept_rows.append((sid, carburant, prix_eur, maj))
+            if latest:
+                latest_by_station[sid] = latest
+        dept_series_by_dept[dept] = average_series(dept_rows)
+        # dept_rows sort de portee ici et est garbage-collecte avant de
+        # passer au departement suivant.
+
+    return latest_by_station, dept_series_by_dept
 
 
 def grouped_latest_averages(latest_by_station, stations_by_id, group_for_cp):
@@ -103,24 +145,25 @@ def grouped_latest_averages(latest_by_station, stations_by_id, group_for_cp):
     return result
 
 
-def average_series(prix_rows):
-    """Serie temporelle de la moyenne d'un ensemble de lignes de prix pour
-    chaque carburant : pour chaque jour ou au moins un prix a change parmi
-    ces lignes, la moyenne du dernier prix connu de chaque station a cette
-    date (report du dernier prix connu entre deux changements, comme un
-    graphique en escalier). Utilisee pour les moyennes departementale,
-    regionale et nationale : meme calcul, seul l'ensemble de lignes passe en
-    entree change (un departement, les departements d'une region, ou tout).
-    Sert a superposer ces tendances au graphique d'evolution d'une station."""
+def average_series(rows):
+    """rows : iterable de (station_id, carburant, prix_eur, maj_officielle),
+    typiquement toutes les lignes d'UN SEUL departement (voir
+    process_all_departments — volontairement pas plus, pour rester petit en
+    memoire). Serie temporelle de la moyenne de cet ensemble pour chaque
+    carburant : pour chaque jour ou au moins un prix a change parmi ces
+    lignes, la moyenne du dernier prix connu de chaque station a cette date
+    (report du dernier prix connu entre deux changements, comme un
+    graphique en escalier). Les moyennes regionale et nationale ne
+    rappellent PAS cette fonction sur un ensemble de lignes plus large :
+    elles fusionnent les series departementales deja calculees, voir
+    merge_series()."""
     by_fuel = {}
-    for r in prix_rows:
+    for sid, carburant, prix_eur, maj in rows:
         try:
-            price = float(r["prix_eur"])
+            price = float(prix_eur)
         except (TypeError, ValueError):
             continue
-        by_fuel.setdefault(r["carburant"], []).append(
-            (r["maj_officielle"], r["station_id"], price)
-        )
+        by_fuel.setdefault(carburant, []).append((maj, sid, price))
 
     series = {}
     for fuel, events in by_fuel.items():
@@ -146,10 +189,54 @@ def average_series(prix_rows):
     return series
 
 
+def merge_series(series_list):
+    """series_list : liste de resultats de average_series() (typiquement,
+    un par departement). Fusionne ces series departementales en une seule
+    serie ponderee par nombre de stations, par carburant — sans jamais
+    retoucher aux lignes de prix brutes. Chaque point d'une serie
+    departementale porte deja (avg, n) ; sum = avg*n redonne la somme des
+    prix de ce departement a cette date, et une somme/compte regionale ou
+    nationale s'obtient en sommant ces sommes/comptes a travers les
+    departements (moyenne ponderee, exacte, pas juste une "moyenne de
+    moyennes"). Cout : proportionnel au nombre de points des series
+    d'entree (quelques milliers par departement) et au nombre de
+    departements fusionnes, jamais au nombre de relevés de prix bruts —
+    c'est ce qui permet de calculer la moyenne nationale sans jamais
+    recharger les dizaines de millions de lignes de tous les departements
+    a la fois."""
+    fuels = set()
+    for s in series_list:
+        fuels.update(s.keys())
+
+    result = {}
+    for fuel in fuels:
+        lists = [s.get(fuel, []) for s in series_list]
+        idx = [0] * len(lists)
+        current = [None] * len(lists)  # (avg, n) le plus recent connu par departement
+
+        points = []
+        while True:
+            candidate_days = [lists[i][idx[i]]["date"] for i in range(len(lists)) if idx[i] < len(lists[i])]
+            if not candidate_days:
+                break
+            day = min(candidate_days)
+            for i in range(len(lists)):
+                while idx[i] < len(lists[i]) and lists[i][idx[i]]["date"] == day:
+                    p = lists[i][idx[i]]
+                    current[i] = (p["avg"], p["n"])
+                    idx[i] += 1
+            total_n = sum(c[1] for c in current if c)
+            if total_n:
+                total_sum = sum(c[0] * c[1] for c in current if c)
+                points.append({"date": day, "avg": round(total_sum / total_n, 4), "n": total_n})
+        result[fuel] = points
+
+    return result
+
+
 def write_station_chunks(stations_dir, stations_rows, latest):
-    """Ecrit un fichier stations/{dept}.js par departement (chargement a la
-    demande cote client, en fonction du code postal recherche)."""
-    os.makedirs(stations_dir, exist_ok=True)
+    """Ecrit un fichier stations/{dept}.json.gz par departement (chargement
+    a la demande cote client, en fonction du code postal recherche)."""
     by_dept = {}
     skipped_no_coords = 0
     skipped_no_price = 0
@@ -179,23 +266,16 @@ def write_station_chunks(stations_dir, stations_rows, latest):
         )
 
     for dept, payload in by_dept.items():
-        path = os.path.join(stations_dir, f"{dept}.js")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("window.STATIONS_DATA = window.STATIONS_DATA || {};\n")
-            f.write(f'window.STATIONS_DATA["{dept}"] = {json.dumps(payload, ensure_ascii=False)};\n')
+        write_gzip_json(os.path.join(stations_dir, f"{dept}.json.gz"), payload)
 
     return by_dept, skipped_no_coords, skipped_no_price
 
 
 def write_dept_avg_chunks(dept_avg_dir, dept_series_by_dept):
-    """Ecrit un fichier dept_avg/{dept}.js par departement (chargement a la
-    demande, superpose au graphique d'evolution d'une station)."""
-    os.makedirs(dept_avg_dir, exist_ok=True)
+    """Ecrit un fichier dept_avg/{dept}.json.gz par departement (charge a la
+    demande quand on clique sur "Voir l'evolution du departement")."""
     for dept, series in dept_series_by_dept.items():
-        path = os.path.join(dept_avg_dir, f"{dept}.js")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("window.DEPT_AVG_DATA = window.DEPT_AVG_DATA || {};\n")
-            f.write(f'window.DEPT_AVG_DATA["{dept}"] = {json.dumps(series, ensure_ascii=False)};\n')
+        write_gzip_json(os.path.join(dept_avg_dir, f"{dept}.json.gz"), series)
 
 
 HTML_TEMPLATE = """<!doctype html>
@@ -203,7 +283,7 @@ HTML_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Recherche des prix des carburants - Nord, Normandie, Grand Est, Ile-de-France</title>
+<title>Recherche des prix des carburants - France</title>
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
 <style>
   :root { color-scheme: light dark; }
@@ -275,10 +355,10 @@ HTML_TEMPLATE = """<!doctype html>
 </style>
 </head>
 <body>
-  <h1>Recherche des prix des carburants - Nord, Normandie, Grand Est, Ile-de-France</h1>
+  <h1>Recherche des prix des carburants - France</h1>
   <p class="description">Cherche un code postal pour voir les stations-service de son departement, leurs prix
-  actuels et l'evolution de leurs tarifs dans le temps. Couvre les 28 departements des regions Hauts-de-France,
-  Normandie, Grand Est et Ile-de-France.</p>
+  actuels et l'evolution de leurs tarifs dans le temps. Couvre la France metropolitaine (la Corse est suivie
+  comme un seul departement, son code postal ne distinguant pas 2A/2B).</p>
   <div class="meta">__NB_STATIONS__ station(s) suivies sur __NB_DEPARTEMENTS__ departement(s) &middot; page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
 
   <div class="national-avg-wrap">
@@ -343,19 +423,46 @@ function parseDate(s) {
   return new Date(s.includes('T') ? s : s.replace(' ', 'T'));
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("impossible de charger " + src));
-    document.head.appendChild(s);
-  });
+// Chaque chunk de donnees est un petit fichier JSON gzippe : fetch() recupere
+// les octets bruts, DecompressionStream (API native du navigateur, aucune
+// dependance) les decompresse a la volee. Necessite d'etre servi en http(s)
+// (GitHub Pages ou `python3 -m http.server` en local) : fetch() ne peut pas
+// lire de fichier local via file://.
+async function fetchGzipJson(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error("ce navigateur ne supporte pas DecompressionStream (mets-le a jour)");
+  }
+  const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
+  const text = await new Response(stream).text();
+  return JSON.parse(text);
 }
 
-const loadedStationChunks = new Set();
-const loadedAvgChunks = new Set();
-const loadedHistoryChunks = new Set();
+const stationsCache = new Map();
+const historyCache = new Map();
+const avgCache = new Map();
+
+async function ensureStationsLoaded(dept) {
+  if (stationsCache.has(dept)) return stationsCache.get(dept);
+  const data = await fetchGzipJson('stations/' + dept + '.json.gz');
+  stationsCache.set(dept, data);
+  return data;
+}
+
+async function ensureHistoryLoaded(sid, dept) {
+  if (historyCache.has(sid)) return historyCache.get(sid);
+  const data = await fetchGzipJson('data/' + dept + '/' + sid + '.json.gz');
+  historyCache.set(sid, data);
+  return data;
+}
+
+async function ensureAvgLoaded(dept) {
+  if (avgCache.has(dept)) return avgCache.get(dept);
+  const data = await fetchGzipJson('dept_avg/' + dept + '.json.gz');
+  avgCache.set(dept, data);
+  return data;
+}
 
 const cpInput = document.getElementById('cpInput');
 const deptAvgWrap = document.getElementById('deptAvgWrap');
@@ -436,25 +543,19 @@ function renderSeriesChart(divId, seriesByFuel) {
   }
 }
 
-function toggleEvolution(btn, el, label, renderFn) {
-  const showing = el.style.display !== 'none';
+nationalEvolutionBtn.addEventListener('click', () => {
+  const showing = nationalChartEl.style.display !== 'none';
   if (showing) {
-    el.style.display = 'none';
-    btn.textContent = label;
+    nationalChartEl.style.display = 'none';
+    nationalEvolutionBtn.textContent = "Voir l'evolution nationale";
     return;
   }
-  el.style.display = 'block';
-  btn.textContent = label.replace("Voir", "Masquer");
-  renderFn();
-}
-
-nationalEvolutionBtn.addEventListener('click', () => {
-  toggleEvolution(nationalEvolutionBtn, nationalChartEl, "Voir l'evolution nationale", () => {
-    if (!nationalChartEl.dataset.rendered) {
-      renderSeriesChart('nationalChart', nationalSeries);
-      nationalChartEl.dataset.rendered = '1';
-    }
-  });
+  nationalChartEl.style.display = 'block';
+  nationalEvolutionBtn.textContent = "Masquer l'evolution nationale";
+  if (!nationalChartEl.dataset.rendered) {
+    renderSeriesChart('nationalChart', nationalSeries);
+    nationalChartEl.dataset.rendered = '1';
+  }
 });
 
 let currentDept = null;
@@ -477,10 +578,10 @@ function showLocalAvg(dept) {
   // ouverts pour un contexte precedent plutot que de laisser un graphique
   // perime affiche.
   deptChartEl.style.display = 'none';
-  deptChartEl.removeAttribute('data-rendered-for');
+  delete deptChartEl.dataset.renderedFor;
   deptEvolutionBtn.textContent = "Voir l'evolution du departement";
   regionChartEl.style.display = 'none';
-  regionChartEl.removeAttribute('data-rendered-for');
+  delete regionChartEl.dataset.renderedFor;
   regionEvolutionBtn.textContent = "Voir l'evolution de la region";
 }
 
@@ -496,16 +597,13 @@ deptEvolutionBtn.addEventListener('click', async () => {
   deptEvolutionBtn.textContent = "Masquer l'evolution du departement";
   if (deptChartEl.dataset.renderedFor === currentDept) return;
   deptChartEl.innerHTML = '<p class="empty">Chargement...</p>';
-  if (!loadedAvgChunks.has(currentDept)) {
-    try {
-      await loadScript('dept_avg/' + currentDept + '.js');
-      loadedAvgChunks.add(currentDept);
-    } catch (e) {
-      deptChartEl.innerHTML = `<p class="empty">${e.message}</p>`;
-      return;
-    }
+  let series;
+  try {
+    series = await ensureAvgLoaded(currentDept);
+  } catch (e) {
+    deptChartEl.innerHTML = `<p class="empty">${e.message}</p>`;
+    return;
   }
-  const series = (window.DEPT_AVG_DATA && window.DEPT_AVG_DATA[currentDept]) || {};
   renderSeriesChart('deptChart', series);
   deptChartEl.dataset.renderedFor = currentDept;
 });
@@ -532,30 +630,27 @@ async function onSearch(cp) {
   }
   const dept = cp.slice(0, 2);
   if (!NOMS_DEPARTEMENTS[dept]) {
-    resetResults(`Departement ${dept} non couvert (Hauts-de-France, Normandie, Grand Est, Ile-de-France uniquement).`);
+    resetResults(`Departement ${dept} non couvert.`);
     return;
   }
 
   showLocalAvg(dept);
 
-  if (!loadedStationChunks.has(dept)) {
-    resultsWrap.innerHTML = '<p class="empty">Chargement des stations...</p>';
-    try {
-      await loadScript('stations/' + dept + '.js');
-      loadedStationChunks.add(dept);
-    } catch (e) {
-      resultsWrap.innerHTML = `<p class="empty">${e.message}</p>`;
-      return;
-    }
+  resultsWrap.innerHTML = '<p class="empty">Chargement des stations...</p>';
+  let all;
+  try {
+    all = await ensureStationsLoaded(dept);
+  } catch (e) {
+    resultsWrap.innerHTML = `<p class="empty">${e.message}</p>`;
+    return;
   }
 
-  renderResults(dept, cp);
+  renderResults(all, cp);
 }
 
 const RESULTS_LIMIT = 150;
 
-function renderResults(dept, cp) {
-  const all = (window.STATIONS_DATA && window.STATIONS_DATA[dept]) || [];
+function renderResults(all, cp) {
   const matches = all.filter(s => s.cp.startsWith(cp)).sort((a, b) => a.adresse.localeCompare(b.adresse));
 
   if (matches.length === 0) {
@@ -622,26 +717,23 @@ async function selectStation(station) {
     cardsEl.appendChild(div);
   });
 
+  let history;
   try {
-    if (!loadedHistoryChunks.has(station.id)) {
-      await loadScript('data/' + station.id + '.js');
-      loadedHistoryChunks.add(station.id);
-    }
+    history = await ensureHistoryLoaded(station.id, dept);
   } catch (e) {
     document.getElementById('chart').innerHTML = `<p class="empty">${e.message}</p>`;
     return;
   }
 
-  const history = (window.STATION_HISTORY_DATA && window.STATION_HISTORY_DATA[station.id]) || [];
-  if (history.length === 0) {
+  if (!history || history.length === 0) {
     document.getElementById('chart').outerHTML = '<p class="empty">Pas d\\'historique disponible pour cette station.</p>';
     return;
   }
 
   const byFuel = {};
-  history.forEach(r => {
-    if (!byFuel[r.carburant]) byFuel[r.carburant] = [];
-    byFuel[r.carburant].push({ x: parseDate(r.maj_officielle), y: parseFloat(r.prix_eur) });
+  history.forEach(([carburant, prix_eur, maj]) => {
+    if (!byFuel[carburant]) byFuel[carburant] = [];
+    byFuel[carburant].push({ x: parseDate(maj), y: parseFloat(prix_eur) });
   });
   Object.values(byFuel).forEach(arr => arr.sort((a, b) => a.x - b.x));
 
@@ -669,6 +761,7 @@ async function selectStation(station) {
           buttons: [
             { count: 1, label: '1m', step: 'month', stepmode: 'backward' },
             { count: 6, label: '6m', step: 'month', stepmode: 'backward' },
+            { count: 1, label: '1a', step: 'year', stepmode: 'backward' },
             { step: 'all', label: 'Tout' },
           ]
         }
@@ -692,32 +785,29 @@ def main():
     regions = config["regions"]
     dept_to_region = {d: region for region, depts in regions.items() for d in depts}
     stations_path = os.path.join(BASE_DIR, config["stations_filename"])
-    prix_dir = os.path.join(BASE_DIR, config["prix_dir"])
+    data_dir = os.path.join(BASE_DIR, config["data_dir"])
     stations_dir = os.path.join(BASE_DIR, config["stations_dir"])
     dept_avg_dir = os.path.join(BASE_DIR, config["dept_avg_dir"])
     site_path = os.path.join(BASE_DIR, config["site_filename"])
 
     stations_rows = read_csv_rows(stations_path)
     stations_by_id = {r["station_id"]: r for r in stations_rows}
-    prix_by_dept = read_prix_dir(prix_dir)
-    all_prix_rows = [r for rows in prix_by_dept.values() for r in rows]
 
-    if not stations_rows or not all_prix_rows:
+    latest, dept_series_by_dept = process_all_departments(data_dir)
+
+    if not stations_rows or not latest:
         print("Aucune donnee disponible : lance d'abord collect_prices.py.")
         return
 
-    latest = latest_prices_by_station(all_prix_rows)
-
     by_dept, skipped_no_coords, skipped_no_price = write_station_chunks(stations_dir, stations_rows, latest)
 
-    dept_series_by_dept = {dept: average_series(rows) for dept, rows in prix_by_dept.items()}
     write_dept_avg_chunks(dept_avg_dir, dept_series_by_dept)
 
     region_series_by_region = {
-        region: average_series([r for d in depts for r in prix_by_dept.get(d, [])])
+        region: merge_series([dept_series_by_dept[d] for d in depts if d in dept_series_by_dept])
         for region, depts in regions.items()
     }
-    national_series = average_series(all_prix_rows)
+    national_series = merge_series(list(dept_series_by_dept.values()))
 
     dept_latest = grouped_latest_averages(latest, stations_by_id, lambda cp: cp[:2] or None)
     region_latest = grouped_latest_averages(
