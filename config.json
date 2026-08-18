@@ -99,6 +99,7 @@
   "annees_passees": [2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
   "inclure_annee_courante": true,
   "stations_filename": "stations.csv",
+  "marques_filename": "marques.csv",
   "data_dir": "data",
   "stations_dir": "stations",
   "dept_avg_dir": "dept_avg",

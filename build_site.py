@@ -55,6 +55,13 @@ def read_csv_rows(path):
         return list(csv.DictReader(f))
 
 
+def read_marques(path):
+    """{station_id: marque} depuis marques.csv (voir fetch_brands.py).
+    Dict vide si le fichier n'existe pas encore (fetch_brands.py jamais
+    lance) : le site fonctionne alors sans marque affichee."""
+    return {r["station_id"]: r["marque"] for r in read_csv_rows(path) if r.get("marque")}
+
+
 def read_gzip_json(path):
     with gzip.open(path, "rt", encoding="utf-8") as f:
         return json.load(f)
@@ -237,9 +244,12 @@ def merge_series(series_list):
     return result
 
 
-def write_station_chunks(stations_dir, stations_rows, latest):
+def write_station_chunks(stations_dir, stations_rows, latest, marques):
     """Ecrit un fichier stations/{dept}.json.gz par departement (chargement
-    a la demande cote client, en fonction du code postal recherche)."""
+    a la demande cote client, en fonction du code postal recherche). marques
+    (station_id -> marque, depuis marques.csv/fetch_brands.py) est une
+    donnee independante de stations.csv : voir docstring de fetch_brands.py
+    pour pourquoi elle n'est pas fusionnee dans stations.csv lui-meme."""
     by_dept = {}
     skipped_no_coords = 0
     skipped_no_price = 0
@@ -256,17 +266,19 @@ def write_station_chunks(stations_dir, stations_rows, latest):
             skipped_no_coords += 1
             continue
         dept = r["cp"][:2]
-        by_dept.setdefault(dept, []).append(
-            {
-                "id": sid,
-                "adresse": r["adresse"],
-                "ville": r["ville"],
-                "cp": r["cp"],
-                "latitude": lat,
-                "longitude": lon,
-                "prices": prices,
-            }
-        )
+        station = {
+            "id": sid,
+            "adresse": r["adresse"],
+            "ville": r["ville"],
+            "cp": r["cp"],
+            "latitude": lat,
+            "longitude": lon,
+            "prices": prices,
+        }
+        marque = marques.get(sid)
+        if marque:
+            station["marque"] = marque
+        by_dept.setdefault(dept, []).append(station)
 
     for dept, payload in by_dept.items():
         write_gzip_json(os.path.join(stations_dir, f"{dept}.json.gz"), payload)
@@ -338,6 +350,10 @@ HTML_TEMPLATE = """<!doctype html>
   .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
+  .brand-badge {
+    display: inline-block; background: #eef2f7; color: #2c3e50; font-weight: 600;
+    padding: 1px 9px; border-radius: 999px; font-size: 0.72rem; vertical-align: middle;
+  }
   #chart { min-height: 560px; }
   .nav-link { display: inline-block; margin-bottom: 16px; font-size: 0.9rem; color: #2980b9; text-decoration: none; }
   .nav-link:hover { text-decoration: underline; }
@@ -472,7 +488,7 @@ function renderResults(all, cp) {
   html += shown.map(s => `
     <button type="button" class="result-row" data-id="${s.id}">
       <div class="result-title">${s.adresse}</div>
-      <div class="result-sub">${s.cp} ${s.ville}</div>
+      <div class="result-sub">${s.cp} ${s.ville}${s.marque ? ' &middot; <span class="brand-badge">' + s.marque + '</span>' : ''}</div>
     </button>
   `).join('');
   resultsWrap.innerHTML = html;
@@ -503,7 +519,7 @@ async function selectStation(station) {
   const dept = station.cp.slice(0, 2);
 
   detailsEl.innerHTML = `
-    <div class="station-title">${station.adresse}</div>
+    <div class="station-title">${station.adresse}${station.marque ? ' <span class="brand-badge">' + station.marque + '</span>' : ''}</div>
     <div class="station-sub">${station.cp} ${station.ville} &middot; id ${station.id}</div>
     <div class="cards" id="cards"></div>
     <h2 class="section-title">Évolution (données disponibles)</h2>
@@ -872,6 +888,7 @@ def main():
     config = load_config()
     departements = config["departements"]
     stations_path = os.path.join(BASE_DIR, config["stations_filename"])
+    marques_path = os.path.join(BASE_DIR, config["marques_filename"])
     data_dir = os.path.join(BASE_DIR, config["data_dir"])
     stations_dir = os.path.join(BASE_DIR, config["stations_dir"])
     dept_avg_dir = os.path.join(BASE_DIR, config["dept_avg_dir"])
@@ -880,6 +897,7 @@ def main():
 
     stations_rows = read_csv_rows(stations_path)
     stations_by_id = {r["station_id"]: r for r in stations_rows}
+    marques = read_marques(marques_path)
 
     latest, dept_series_by_dept = process_all_departments(data_dir)
 
@@ -887,7 +905,9 @@ def main():
         print("Aucune donnee disponible : lance d'abord collect_prices.py.")
         return
 
-    by_dept, skipped_no_coords, skipped_no_price = write_station_chunks(stations_dir, stations_rows, latest)
+    by_dept, skipped_no_coords, skipped_no_price = write_station_chunks(
+        stations_dir, stations_rows, latest, marques
+    )
 
     write_dept_avg_chunks(dept_avg_dir, dept_series_by_dept)
 
@@ -925,7 +945,8 @@ def main():
     print(
         f"Site genere : {config['site_filename']} + {config['comparison_filename']} "
         f"({nb_stations} station(s) sur {len(by_dept)} departement(s), "
-        f"{skipped_no_price} ignoree(s) sans prix connu, {skipped_no_coords} ignoree(s) sans coordonnees)."
+        f"{skipped_no_price} ignoree(s) sans prix connu, {skipped_no_coords} ignoree(s) sans coordonnees, "
+        f"{len(marques)} avec marque connue)."
     )
 
 

@@ -55,6 +55,10 @@
   .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
+  .brand-badge {
+    display: inline-block; background: #eef2f7; color: #2c3e50; font-weight: 600;
+    padding: 1px 9px; border-radius: 999px; font-size: 0.72rem; vertical-align: middle;
+  }
   #chart { min-height: 560px; }
   .nav-link { display: inline-block; margin-bottom: 16px; font-size: 0.9rem; color: #2980b9; text-decoration: none; }
   .nav-link:hover { text-decoration: underline; }
@@ -65,7 +69,7 @@
   <p class="description">Cherche un code postal pour voir les stations-service de son departement, leurs prix
   actuels et l'evolution de leurs tarifs dans le temps. Couvre la France metropolitaine (la Corse est suivie
   comme un seul departement, son code postal ne distinguant pas 2A/2B).</p>
-  <div class="meta">12214 station(s) suivies sur 95 departement(s) &middot; page generee le 18/08/2026 15:33 &middot; source : flux officiel donnees.roulez-eco.fr</div>
+  <div class="meta">12214 station(s) suivies sur 95 departement(s) &middot; page generee le 18/08/2026 15:54 &middot; source : flux officiel donnees.roulez-eco.fr</div>
 
   <a class="nav-link" href="comparaison.html">Comparer les prix par departement / national &rarr;</a>
 
@@ -189,7 +193,7 @@ function renderResults(all, cp) {
   html += shown.map(s => `
     <button type="button" class="result-row" data-id="${s.id}">
       <div class="result-title">${s.adresse}</div>
-      <div class="result-sub">${s.cp} ${s.ville}</div>
+      <div class="result-sub">${s.cp} ${s.ville}${s.marque ? ' &middot; <span class="brand-badge">' + s.marque + '</span>' : ''}</div>
     </button>
   `).join('');
   resultsWrap.innerHTML = html;
@@ -220,7 +224,7 @@ async function selectStation(station) {
   const dept = station.cp.slice(0, 2);
 
   detailsEl.innerHTML = `
-    <div class="station-title">${station.adresse}</div>
+    <div class="station-title">${station.adresse}${station.marque ? ' <span class="brand-badge">' + station.marque + '</span>' : ''}</div>
     <div class="station-sub">${station.cp} ${station.ville} &middot; id ${station.id}</div>
     <div class="cards" id="cards"></div>
     <h2 class="section-title">Évolution (données disponibles)</h2>

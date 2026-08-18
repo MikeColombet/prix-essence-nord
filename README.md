@@ -30,12 +30,16 @@ GitHub Pages sert déjà le site en https.
 
 - `collect_prices.py` — récupère les stations des départements suivis et
   leur historique de prix, écrit `stations.csv` et `data/{dept}/{id}.json.gz`.
+- `fetch_brands.py` — récupère la marque des stations (TotalEnergies, Esso,
+  Carrefour, ...) depuis OpenStreetMap, écrit `marques.csv`. Indépendant de
+  `collect_prices.py` (voir « Marque des stations » plus bas).
 - `build_site.py` — génère `index.html` et `comparaison.html`, plus les
-  fichiers de données chargés à la demande, à partir de `stations.csv` et
-  `data/*/*.json.gz`.
+  fichiers de données chargés à la demande, à partir de `stations.csv`,
+  `marques.csv` et `data/*/*.json.gz`.
 - `config.json` — paramètres (départements suivis, regroupement par région,
-  années d'historique à récupérer, noms des deux pages générées).
+  années d'historique à récupérer, noms des fichiers/pages générés).
 - `stations.csv` — une ligne par station (adresse, ville, code postal, coordonnées).
+- `marques.csv` — une ligne par station ayant une marque connue (station_id, marque).
 - `data/{dept}/{id}.json.gz` — historique complet des prix d'une station
   (ex: `[["Gazole","1.827","2019-03-02T08:00:00"], ...]`), compressé,
   chargé à la demande quand tu la sélectionnes depuis `index.html`. **Seule
@@ -126,6 +130,31 @@ prix moyen actuel de chaque carburant et un indicateur (▼ vert = moins cher,
 Clique une ligne pour afficher son évolution dans le temps (chargée à la
 demande depuis `dept_avg/{dept}.json.gz`).
 
+## Marque des stations
+
+Le flux officiel du gouvernement ne contient jamais la marque/enseigne
+d'une station (Esso, TotalEnergies, Carrefour, ...) — seule l'adresse.
+`fetch_brands.py` la récupère séparément depuis OpenStreetMap (API
+Overpass) : beaucoup de stations OSM portent un tag
+`ref:FR:prix-carburants` — le même identifiant que celui du flux officiel —
+ce qui permet une jointure exacte. Pour les stations sans ce tag, la
+station OSM la plus proche (moins de 100 m) portant une marque est utilisée
+à la place. Sur toute la France (août 2026) : ~64% de correspondance exacte
+par identifiant, ~79% en ajoutant le rattachement par proximité — les
+stations restantes n'ont simplement pas de marque affichée.
+
+```bash
+python3 fetch_brands.py    # ecrit marques.csv (quelques minutes, interroge
+                            # plusieurs miroirs Overpass avec repli si l'un
+                            # est indisponible)
+python3 build_site.py      # regenere le site pour inclure les marques
+```
+
+Une marque change rarement : pas besoin de relancer `fetch_brands.py` à
+chaque collecte de prix. `.github/workflows/update-brands.yml` le fait
+automatiquement une fois par semaine (dimanche 3h UTC), ou à la demande
+depuis l'onglet Actions de GitHub.
+
 ## Automatiser la collecte (macOS, optionnel)
 
 Si tu utilises la mise à jour automatique via GitHub Actions (voir
@@ -154,9 +183,9 @@ Confidentialité et sécurité > Accès complet au disque.
 ## Ajouter ou retirer un département
 
 Édite l'objet `"departements"` dans `config.json` (clé = code département
-sur 2 chiffres, valeur = nom affiché). Supprime `stations.csv` et le
-contenu de `data/`, `stations/` et `dept_avg/`, puis
-relance `collect_prices.py` et `build_site.py`.
+sur 2 chiffres, valeur = nom affiché). Supprime `stations.csv`,
+`marques.csv` et le contenu de `data/`, `stations/` et `dept_avg/`, puis
+relance `collect_prices.py`, `fetch_brands.py` (optionnel) et `build_site.py`.
 
 ## Autres carburants
 

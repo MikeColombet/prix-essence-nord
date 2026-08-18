@@ -8,14 +8,18 @@ A fuel-price site built from France's official open data feed
 (`donnees.roulez-eco.fr`, same source as prix-carburants.gouv.fr), covering
 every station in metropolitan France — 95 départements (Corse is tracked as
 a single département "20" since its postal code prefix doesn't distinguish
-2A/2B) — with 10 years of price history. There is no map. Two pure-stdlib
+2A/2B) — with 10 years of price history. There is no map. Three pure-stdlib
 Python 3 scripts (no dependencies, no `requirements.txt`) build a static
-site that a GitHub Action regenerates and publishes via GitHub Pages every
-12 hours:
+site that GitHub Actions regenerate and publish via GitHub Pages:
 
 - `collect_prices.py` — fetches/updates `stations.csv` and per-station
-  compressed history files (`data/{dept}/{station_id}.json.gz`).
-- `build_site.py` — reads those files and (re)generates **two separate
+  compressed history files (`data/{dept}/{station_id}.json.gz`). Runs every
+  12h.
+- `fetch_brands.py` — enriches stations with their brand (TotalEnergies,
+  Esso, Carrefour, ...) from OpenStreetMap, since the government feed never
+  has it. Writes `marques.csv`, independent of `stations.csv`'s lifecycle
+  (see below). Runs weekly — brands don't change often.
+- `build_site.py` — reads all of the above and (re)generates **two separate
   pages with distinct purposes**, plus the on-demand compressed data chunks
   (`stations/{dept}.json.gz`, `dept_avg/{dept}.json.gz`) they share:
   - `index.html` — postal-code search only. No averages, no comparison —
@@ -40,7 +44,8 @@ compression was introduced. Test locally with `python3 -m http.server`.
 ```bash
 python3 collect_prices.py                # full pass: instant feed + annual archives configured in config.json
 python3 collect_prices.py --maj-seulement # fast pass: instant feed only, no archive re-download
-python3 build_site.py                     # regenerate index.html + comparaison.html + data chunks (run after collect_prices.py)
+python3 fetch_brands.py                   # refresh marques.csv from OpenStreetMap (independent, run rarely)
+python3 build_site.py                     # regenerate index.html + comparaison.html + data chunks (run after the above)
 python3 -m http.server                    # serve the site locally (required — see above)
 ```
 
@@ -62,6 +67,24 @@ casually rerun it while iterating; use `--maj-seulement` for quick checks.
 Both are downloaded in full (there's no server-side département filter) and
 filtered client-side to the départements in `config.json`. The feed never
 includes a brand/name — only address — so station identity is address-only.
+
+**Brand enrichment is a separate data lifecycle, deliberately not merged
+into `stations.csv`.** `stations.csv` is fully rewritten by
+`collect_prices.py` every 12h from scratch (`write_stations_csv()`) — any
+brand column added to it would be silently wiped on the next price
+collection. `fetch_brands.py` instead writes `marques.csv`
+(`station_id,marque`), read independently by `build_site.py`
+(`read_marques()`) and merged into each station's payload only at build
+time (`write_station_chunks()`'s `marques` param) — a station with no known
+brand simply omits the `"marque"` key rather than carrying a null. Matching
+against OpenStreetMap: prefer the exact `ref:FR:prix-carburants` tag (same
+station ID as the government feed — an inherited artifact of a 2020
+government-data import into OSM, since community-maintained); for stations
+without that tag, fall back to the nearest OSM fuel node with a brand tag
+within `MAX_FALLBACK_DISTANCE_M` (100m), found via a simple lat/lon grid
+bucketed at `GRID_STEP_DEG` (~1km) rather than brute-force distance to every
+OSM node. Measured coverage (Aug 2026, France-wide): ~64% exact-ID match,
+~79% including the proximity fallback.
 
 **Price normalization.** Archives before ~2022 encode price as integer
 millièmes with no decimal separator (`"1126"` → 1.126 €); newer feeds use
@@ -169,13 +192,21 @@ the Python string constants directly.
 
 ## CI/CD
 
-`.github/workflows/update.yml` runs both scripts every 12h (`0 */12 * * *`
-UTC) and on manual dispatch (with an optional "full history refresh" input —
-this re-downloads all configured years across all of France, hence the
-3-hour `timeout-minutes`), then commits and pushes any changed data
-(including both `index.html` and `comparaison.html`) as `github-actions[bot]`.
-`concurrency.cancel-in-progress: false` ensures overlapping runs queue
-rather than race. GitHub Pages serves the repo root directly — there is no
+Two independent scheduled workflows, matching the two independent data
+lifecycles above:
+
+- `.github/workflows/update.yml` — `collect_prices.py` + `build_site.py`
+  every 12h (`0 */12 * * *` UTC) and on manual dispatch (with an optional
+  "full history refresh" input — this re-downloads all configured years
+  across all of France, hence the 3-hour `timeout-minutes`).
+- `.github/workflows/update-brands.yml` — `fetch_brands.py` + `build_site.py`
+  weekly (Sunday 3am UTC) and on manual dispatch. Kept infrequent
+  deliberately, to avoid hammering the shared public Overpass infrastructure
+  for data that rarely changes.
+
+Both commit and push any changed data as `github-actions[bot]`, each with
+its own `concurrency` group so they queue rather than race each other or
+themselves. GitHub Pages serves the repo root directly — there is no
 separate deploy/build step.
 
 See `GITHUB.md` for one-time repo setup (Pages + Actions write permissions)
