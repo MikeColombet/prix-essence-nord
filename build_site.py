@@ -553,6 +553,10 @@ async function selectStation(station) {
 
   try {
     if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    // Plotly.newPlot ne vide pas le contenu HTML deja present dans le div
+    // cible (ex: le message "Chargement..."), il ajoute juste son propre
+    // graphique a cote : on vide explicitement avant de dessiner.
+    document.getElementById('chart').innerHTML = '';
     Plotly.newPlot('chart', traces, {
       height: 560,
       margin: { t: 10, r: 20, l: 55, b: 70 },
@@ -767,6 +771,10 @@ function renderSeriesChart(divId, seriesByFuel) {
   }));
   try {
     if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    // Plotly.newPlot ne vide pas le contenu HTML deja present dans le div
+    // cible (ex: le message "Chargement..." ou un graphique precedent), il
+    // ajoute juste son propre graphique a cote : on vide explicitement.
+    el.innerHTML = '';
     Plotly.newPlot(divId, traces, {
       height: 380,
       margin: { t: 10, r: 20, l: 55, b: 60 },
