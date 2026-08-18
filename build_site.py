@@ -331,8 +331,10 @@ HTML_TEMPLATE = """<!doctype html>
     background: #fff; border-radius: 10px; padding: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
   }
-  #franceMap { width: 100%; height: 620px; }
-  @media (max-width: 600px) { #franceMap { height: 70vh; } }
+  #franceMap { width: 100%; height: 420px; }
+  @media (max-width: 600px) { #franceMap { height: 360px; } }
+  .station-map-wrap { margin-bottom: 16px; }
+  #stationMap { width: 100%; height: 220px; border-radius: 8px; overflow: hidden; }
   .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
   .results-wrap {
     background: #fff; border-radius: 10px; padding: 12px;
@@ -564,6 +566,35 @@ async function renderFranceMap(stations) {
   }
 }
 
+// Petite carte de localisation d'une seule station (pas d'interaction
+// necessaire au-dela du zoom/pan natif de la carte, donc pas de barre
+// d'outils Plotly qui n'apporterait rien dans un si petit espace).
+function renderStationMap(station) {
+  const el = document.getElementById('stationMap');
+  if (!el || !station.latitude || !station.longitude) return;
+  try {
+    if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    Plotly.newPlot('stationMap', [{
+      type: 'scattermap',
+      mode: 'markers',
+      lat: [station.latitude],
+      lon: [station.longitude],
+      hoverinfo: 'skip',
+      marker: { size: 16, color: '#c0392b' },
+    }], {
+      map: {
+        style: 'open-street-map',
+        center: { lat: station.latitude, lon: station.longitude },
+        zoom: 14,
+      },
+      margin: { t: 0, r: 0, l: 0, b: 0 },
+    }, { responsive: true, displaylogo: false, displayModeBar: false });
+  } catch (e) {
+    el.innerHTML = `<p class="empty">Carte indisponible : ${e.message}</p>`;
+    console.error(e);
+  }
+}
+
 async function onSearch(cp) {
   if (cp.length < 2) {
     resetResults("Tape au moins les 2 premiers chiffres d'un code postal.");
@@ -638,10 +669,13 @@ async function selectStation(station) {
   detailsEl.innerHTML = `
     <div class="station-title">${station.adresse}${station.marque ? ' <span class="brand-badge">' + station.marque + '</span>' : ''}</div>
     <div class="station-sub">${station.cp} ${station.ville} &middot; id ${station.id}</div>
+    <div class="station-map-wrap"><div id="stationMap"></div></div>
     <div class="cards" id="cards"></div>
     <h2 class="section-title">Évolution (données disponibles)</h2>
     <div id="chart"><p class="empty">Chargement...</p></div>
   `;
+
+  renderStationMap(station);
 
   const cardsEl = document.getElementById('cards');
   Object.keys(station.prices).sort().forEach(fuel => {
