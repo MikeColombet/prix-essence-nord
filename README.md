@@ -1,11 +1,17 @@
 # Recherche des prix essence – France
 
-Site de recherche des stations-service par code postal, avec prix actuels,
-moyennes département / région / nationale par carburant (actuelles et leur
-évolution) et historique par station sur 10 ans. Couvre la France
-métropolitaine (95 départements — la Corse est suivie comme un seul
-département « 20 », son code postal ne distinguant pas 2A/2B ; voir la liste
-complète dans `config.json`).
+Deux pages statiques, générées à partir des mêmes données, chacune avec un
+objectif unique :
+- `index.html` — recherche de stations par code postal : prix actuels et
+  évolution sur 10 ans d'une station.
+- `comparaison.html` — moyenne nationale actuelle (et son évolution), et
+  deux tableaux (régions, départements par numéro) avec le prix de chaque
+  carburant et un indicateur moins cher/plus cher que la moyenne nationale ;
+  clique une ligne pour voir son évolution.
+
+Couvre la France métropolitaine (95 départements — la Corse est suivie
+comme un seul département « 20 », son code postal ne distinguant pas
+2A/2B ; voir la liste complète dans `config.json`).
 
 Le site est mis à jour automatiquement toutes les 12h par une GitHub Action
 et publié via GitHub Pages — voir `GITHUB.md` pour la mise en ligne.
@@ -24,23 +30,28 @@ GitHub Pages sert déjà le site en https.
 
 - `collect_prices.py` — récupère les stations des départements suivis et
   leur historique de prix, écrit `stations.csv` et `data/{dept}/{id}.json.gz`.
-- `build_site.py` — génère `index.html` et les fichiers de données chargés à
-  la demande, à partir de `stations.csv` et `data/*/*.json.gz`.
+- `build_site.py` — génère `index.html` et `comparaison.html`, plus les
+  fichiers de données chargés à la demande, à partir de `stations.csv` et
+  `data/*/*.json.gz`.
 - `config.json` — paramètres (départements suivis, regroupement par région,
-  années d'historique à récupérer).
+  années d'historique à récupérer, noms des deux pages générées).
 - `stations.csv` — une ligne par station (adresse, ville, code postal, coordonnées).
 - `data/{dept}/{id}.json.gz` — historique complet des prix d'une station
   (ex: `[["Gazole","1.827","2019-03-02T08:00:00"], ...]`), compressé,
-  chargé à la demande quand tu la sélectionnes. **Seule copie** des prix : il
-  n'y a pas de CSV séparé en plus (voir « Pourquoi compresser » plus bas).
+  chargé à la demande quand tu la sélectionnes depuis `index.html`. **Seule
+  copie** des prix : il n'y a pas de CSV séparé en plus (voir « Pourquoi
+  compresser » plus bas).
 - `stations/{dept}.json.gz` — liste des stations d'un département avec leurs
-  prix actuels, chargée à la demande quand tu recherches un code postal.
+  prix actuels, chargée à la demande quand tu recherches un code postal
+  dans `index.html`.
 - `dept_avg/{dept}.json.gz` — moyenne historique d'un département par
-  carburant, chargée à la demande quand tu cliques sur « Voir l'évolution du
-  département ». Les moyennes régionale et nationale sont assez petites (une
-  valeur par jour, pas par station) pour être embarquées directement dans
-  `index.html`, non compressées.
-- `index.html` — la page de recherche (page d'accueil du dépôt / de GitHub Pages).
+  carburant, chargée à la demande depuis `comparaison.html` quand tu cliques
+  sur une ligne du tableau des départements. Les moyennes régionale et
+  nationale sont assez petites (une valeur par jour, pas par station) pour
+  être embarquées directement dans `comparaison.html`, non compressées.
+- `index.html` — la page de recherche par code postal (page d'accueil du
+  dépôt / de GitHub Pages).
+- `comparaison.html` — la page de comparaison département / région / national.
 
 ## Pourquoi compresser, et pourquoi une seule copie des prix
 
@@ -82,7 +93,9 @@ python3 -m http.server     # sert le site en local (necessaire, voir plus haut)
 
 Ouvre ensuite `http://localhost:8000/`, tape un code postal (au moins les 2
 premiers chiffres) pour voir les stations du département, puis clique sur
-une station pour voir ses prix actuels et son évolution.
+une station pour voir ses prix actuels et son évolution. Depuis cette page,
+un lien mène à `comparaison.html` pour comparer les prix par département,
+région et national.
 
 À prévoir au premier lancement : `collect_prices.py` télécharge 10 archives
 annuelles complètes de la France (~10-35 Mo chacune, zip), traitées une par
@@ -100,20 +113,18 @@ un import ponctuel, les mises à jour suivantes (`--maj-seulement`) sont rapides
 - Relance `python3 build_site.py` après chaque mise à jour de `data/` /
   `stations.csv` pour que le site reflète les nouvelles données.
 
-## Moyennes département / région / nationale
+## Comparaison département / région / nationale (`comparaison.html`)
 
-La moyenne nationale actuelle de chaque carburant (sur l'ensemble des
-départements suivis) s'affiche en haut de la page, avant même de chercher un
-code postal. Dès que tu recherches un code postal ou sélectionnes une
-station, ses moyennes département et région s'affichent aussi (calculées à
-partir du dernier prix connu de chaque station concernée) ; elles se
-recalculent pour refléter le département/la région de la station
-effectivement sélectionnée, pas seulement du code postal tapé.
+En haut de la page : la moyenne nationale actuelle de chaque carburant (sur
+l'ensemble des départements suivis), avec un bouton « Voir l'évolution »
+(graphique indépendant, pas superposé à une station).
 
-Chaque niveau a son propre bouton « Voir l'évolution » : clique dessus pour
-afficher son graphique d'évolution (une courbe par carburant, recalculée jour
-par jour à partir de l'ensemble des fichiers `data/`). C'est un graphique
-indépendant, pas superposé à celui d'une station.
+En dessous, deux tableaux — régions puis départements (triés par numéro) —
+avec le prix moyen actuel de chaque carburant et un indicateur (▼ vert =
+moins cher, ▲ rouge = plus cher) par rapport à la moyenne nationale de ce
+carburant. Clique une ligne pour afficher son évolution dans le temps
+(région : déjà en mémoire ; département : chargé à la demande depuis
+`dept_avg/{dept}.json.gz`).
 
 ## Automatiser la collecte (macOS, optionnel)
 

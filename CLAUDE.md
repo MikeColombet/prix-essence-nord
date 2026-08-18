@@ -4,20 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A fuel-price search site built from France's official open data feed
+A fuel-price site built from France's official open data feed
 (`donnees.roulez-eco.fr`, same source as prix-carburants.gouv.fr), covering
 every station in metropolitan France — 95 départements (Corse is tracked as
 a single département "20" since its postal code prefix doesn't distinguish
-2A/2B) — with 10 years of price history. Users search by postal code; there
-is no map. Two pure-stdlib Python 3 scripts (no dependencies, no
-`requirements.txt`) build a static site that a GitHub Action regenerates and
-publishes via GitHub Pages every 12 hours:
+2A/2B) — with 10 years of price history. There is no map. Two pure-stdlib
+Python 3 scripts (no dependencies, no `requirements.txt`) build a static
+site that a GitHub Action regenerates and publishes via GitHub Pages every
+12 hours:
 
 - `collect_prices.py` — fetches/updates `stations.csv` and per-station
   compressed history files (`data/{dept}/{station_id}.json.gz`).
-- `build_site.py` — reads those files and (re)generates `index.html` plus the
-  on-demand compressed data chunks (`stations/{dept}.json.gz`,
-  `dept_avg/{dept}.json.gz`).
+- `build_site.py` — reads those files and (re)generates **two separate
+  pages with distinct purposes**, plus the on-demand compressed data chunks
+  (`stations/{dept}.json.gz`, `dept_avg/{dept}.json.gz`) they share:
+  - `index.html` — postal-code search only. No averages, no comparison —
+    that's deliberately not this page's job (see below).
+  - `comparaison.html` — current national average (+ its evolution), and
+    two sortable-by-code tables (régions, départements) each showing every
+    fuel's price with a cheaper/pricier-than-national indicator. Click a
+    row for that département/région's evolution chart.
 
 There is no build system, package manager, linter, or test suite — this is
 intentional; treat "no dependencies" as a constraint to preserve, not a gap
@@ -34,14 +40,14 @@ compression was introduced. Test locally with `python3 -m http.server`.
 ```bash
 python3 collect_prices.py                # full pass: instant feed + annual archives configured in config.json
 python3 collect_prices.py --maj-seulement # fast pass: instant feed only, no archive re-download
-python3 build_site.py                     # regenerate index.html + data chunks (run after collect_prices.py)
+python3 build_site.py                     # regenerate index.html + comparaison.html + data chunks (run after collect_prices.py)
 python3 -m http.server                    # serve the site locally (required — see above)
 ```
 
 No test/lint/build commands exist. Validate changes by running both scripts
-in sequence, serving via `http.server`, and opening `http://localhost:8000/`
-in a browser (type a 2+ digit postal code prefix, e.g. `59`, to trigger the
-on-demand chunk loading path).
+in sequence, serving via `http.server`, and opening both
+`http://localhost:8000/index.html` (search) and
+`http://localhost:8000/comparaison.html` (tables) in a browser.
 
 A full `collect_prices.py` run (no `--maj-seulement`) downloads and merges 10
 years of France-wide archives — expect tens of minutes, not seconds. Don't
@@ -87,25 +93,42 @@ being processed at that instant, independent of total corpus size.
 `merge_station_history()` does the actual dedup-and-rewrite per station,
 keyed on `(carburant, maj_officielle)`.
 
-**Station/price data is lazy-loaded by département/station; averages are
-three-tier (département/région/national).** `index.html` ships only the
-search UI plus small lookups: `NOMS_DEPARTEMENTS`, `DEPT_TO_REGION` (derived
-from `config.json`'s `regions` map — 13 official metropolitan régions), and
-the *current* average per fuel at each level (`deptLatest`, `regionLatest`,
-`nationalLatest`). Typing a postal code prefix fetches+decompresses
-`stations/{dept}.json.gz` (via `fetchGzipJson()` → `ensureStationsLoaded()`,
-cached in `stationsCache`); selecting a station fetches
-`data/{dept}/{id}.json.gz` (`ensureHistoryLoaded()` → `historyCache`).
-`dept_avg/{dept}.json.gz` (`ensureAvgLoaded()` → `avgCache`) is fetched
-separately, only when the user clicks "Voir l'évolution du département" —
-not tied to station selection.
+**`index.html` and `comparaison.html` are two independent HTML string
+templates in `build_site.py` (`HTML_TEMPLATE` and `HTML_TEMPLATE_COMPARE`),
+each self-contained** — no shared JS module, matching this project's
+long-standing "no build step, no bundler" approach. Small helpers
+(`fetchGzipJson`, `colorFor`, `renderSeriesChart`, `sortFuels`, `parseDate`)
+are duplicated between the two rather than factored out; keep both in sync
+if their logic changes.
 
-**Régional and national *historical* series (`regionSeries`,
-`nationalSeries`) are the one exception to "nothing embedded" in
-`index.html`.** Unlike per-station or per-département data, their size is
-bounded by *calendar days*, not station count (see below) — at only 13
-regions + 1 national series, cheap enough to embed directly rather than
-chunk.
+**`index.html` ships only the search UI plus `NOMS_DEPARTEMENTS`** (for
+validating a typed postal code's département). No average data is embedded
+or fetched here at all — that's `comparaison.html`'s job entirely. Typing a
+postal code prefix fetches+decompresses `stations/{dept}.json.gz` (via
+`fetchGzipJson()` → `ensureStationsLoaded()`, cached in `stationsCache`);
+selecting a station fetches `data/{dept}/{id}.json.gz`
+(`ensureHistoryLoaded()` → `historyCache`) and renders *only that station's*
+price lines — no dept/region/national overlay (an earlier version
+superimposed those on a station's chart for comparison; removed as unwanted
+complexity, then the whole averages concept was later moved off this page
+entirely).
+
+**`comparaison.html` embeds `NOMS_DEPARTEMENTS`, and the *current* average
+per fuel at each level (`deptLatest`, `regionLatest`, `nationalLatest`),
+plus the *historical* `regionSeries`/`nationalSeries`.** Unlike per-station
+data, series size is bounded by *calendar days* not station count (see
+below) — at only 13 regions + 1 national series, cheap enough to embed
+directly. `dept_avg/{dept}.json.gz` (a département's own historical series)
+stays chunked/lazy (`ensureAvgLoaded()` → `avgCache`) since there are 95 of
+them — fetched only when its table row is clicked.
+
+Both region and département tables are built by iterating
+`Object.keys(NOMS_DEPARTEMENTS)`/`regionLatest` client-side, one `<tr>` per
+entry; each fuel cell (`fuelCell()`) compares that row's average against
+`nationalLatest[fuel]` via `indicatorFor()` (▼ green if cheaper, ▲ red if
+pricier, nothing if within 0.0005€). Clicking any row (`.cmp-row`) loads/
+renders that département's or région's series into a single shared
+`#evolutionDetail` panel below both tables — not a chart per row.
 
 **Average series (`average_series()` in `build_site.py`) is grouping-agnostic
 — same function computes département, region, and national.** For whatever
@@ -113,41 +136,22 @@ set of `(station_id, carburant, prix_eur, maj_officielle)` rows it's given,
 it computes one point per calendar day where at least one included station
 changed price: the average of each station's latest known price as of that
 day (forward-filled between changes, i.e. a step function). Called once per
-département (that département's own rows from `load_all_history()`) for
-`dept_avg/{dept}.json.gz`, once per region (concatenated rows of member
-départements) for the embedded `regionSeries`, once on every row for
-`nationalSeries`. Output size depends only on distinct days touched, not on
-station count — why region/national series don't need chunking despite
-aggregating far more stations than any one département. Latest
-(non-historical) averages use the analogous `grouped_latest_averages()`,
-parameterized by a `group_for_cp(cp) -> key` callback (département code,
-region name via `DEPT_TO_REGION`, or a constant for the national bucket).
+département (that département's own rows from `process_all_departments()`)
+for `dept_avg/{dept}.json.gz`; region/national series are then obtained by
+`merge_series()` — combining already-computed small département series
+(weighted by station count) rather than ever re-touching raw rows, see that
+function's docstring. Latest (non-historical) averages use the analogous
+`grouped_latest_averages()`, parameterized by a `group_for_cp(cp) -> key`
+callback (département code, region name via a `dept_to_region` map built
+in `main()`, or a constant for the national bucket).
 
-**Average evolution graphs are standalone, not overlaid on a station's
-chart.** An earlier version superimposed dept/region/national trend lines on
-a selected station's own evolution chart for direct comparison; this was
-removed as unwanted complexity. Each average level (national, département,
-région) instead has its own "Voir l'évolution" toggle button next to its
-cards (`nationalEvolutionBtn`/`deptEvolutionBtn`/`regionEvolutionBtn`) that
-renders *only that level's* trend into its own chart div
-(`renderSeriesChart()`, shared by all three) — a station's evolution chart
-(`selectStation()`) shows only that station's own price lines.
-
-**Averages reflect the selected station, not just the search box.**
-`selectStation(station)` derives `dept` from `station.cp` itself (not from
-outer search state) and calls `showLocalAvg(dept)` again on selection — the
-"Moyennes actuelles" cards (and `currentDept`/`currentRegion`, which the
-evolution buttons read) are always keyed off the station actually clicked.
-`showLocalAvg()` also closes and resets any open département/région
-evolution chart from a previous context, so a stale graph is never left
-showing after the department/region changes.
-
-**HTML generation is template substitution, not a template engine.**
-`build_site.py`'s `HTML_TEMPLATE` is a Python string with
-`__PLACEHOLDER__` markers substituted via `.replace()`, then written to
-`index.html`. Charts are Plotly.js loaded from a CDN (`plotly.js-dist-min`)
-with no bundler. All UI/search/chart logic is inline `<script>` in the
-template — edit the Python string constant directly.
+**HTML generation is template substitution, not a template engine.** Each
+of `HTML_TEMPLATE` / `HTML_TEMPLATE_COMPARE` is a Python string with
+`__PLACEHOLDER__` markers substituted via `.replace()` in `main()`, then
+written to `index.html` / `comparaison.html` respectively. Charts are
+Plotly.js loaded from a CDN (`plotly.js-dist-min`) with no bundler. All
+UI/search/chart/table logic is inline `<script>` in the templates — edit
+the Python string constants directly.
 
 **Adding/removing a département.** Edit the `departements` (and `regions`,
 if needed) objects in `config.json` (2-digit code → display name), clear
@@ -158,10 +162,11 @@ if needed) objects in `config.json` (2-digit code → display name), clear
 `.github/workflows/update.yml` runs both scripts every 12h (`0 */12 * * *`
 UTC) and on manual dispatch (with an optional "full history refresh" input —
 this re-downloads all configured years across all of France, hence the
-3-hour `timeout-minutes`), then commits and pushes any changed data as
-`github-actions[bot]`. `concurrency.cancel-in-progress: false` ensures
-overlapping runs queue rather than race. GitHub Pages serves the repo root
-directly (`index.html`) — there is no separate deploy/build step.
+3-hour `timeout-minutes`), then commits and pushes any changed data
+(including both `index.html` and `comparaison.html`) as `github-actions[bot]`.
+`concurrency.cancel-in-progress: false` ensures overlapping runs queue
+rather than race. GitHub Pages serves the repo root directly — there is no
+separate deploy/build step.
 
 See `GITHUB.md` for one-time repo setup (Pages + Actions write permissions)
 and `README.md` for detailed usage.

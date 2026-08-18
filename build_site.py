@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Construit index.html : un site de recherche de stations-service par code
-postal, couvrant la France metropolitaine (95 departements, la Corse suivie
-comme un seul departement "20"). Tape un code postal, la liste des stations
-de son departement s'affiche, clique sur une station pour voir ses prix
-actuels et son evolution. La page affiche aussi la moyenne actuelle de
-chaque carburant (departement, region, national), et un bouton "Voir
-l'evolution" sous chaque niveau ouvre son propre graphique d'evolution
-(independant de la station selectionnee, pas superpose dessus).
+Construit deux pages statiques a partir des donnees collectees par
+collect_prices.py, couvrant la France metropolitaine (95 departements, la
+Corse suivie comme un seul departement "20") :
 
-La page principale ne contient aucune donnee de station ou de prix : elles
-sont chargees a la demande, par departement (stations/{dept}.json.gz,
-dept_avg/{dept}.json.gz) ou par station (data/{dept}/{id}.json.gz), generees
-par ce script et par collect_prices.py. A l'echelle de la France entiere sur
-10 ans, tout charger d'un coup rendrait la page d'accueil enorme ; le
-chargement a la demande la garde legere quel que soit le nombre total de
-stations suivies. Chaque fichier est gzippe (le navigateur le decompresse
-via DecompressionStream, une API native, pas de dependance) : ca reduit
-encore la taille transferee/stockee d'un facteur ~5-8 sur ce genre de
-donnees tres repetitives. Consequence : le site doit etre servi en http(s)
-(GitHub Pages, ou `python3 -m http.server` en local) — fetch() ne peut pas
-lire de fichiers locaux via file://, contrairement aux <script src> utilises
-avant ce changement.
+- index.html — uniquement la recherche par code postal. Tape un code
+  postal, la liste des stations de son departement s'affiche, clique sur
+  une station pour voir ses prix actuels et son evolution. Aucune moyenne
+  departement/region/national ici : voir comparaison.html.
+- comparaison.html — moyenne nationale actuelle (+ son evolution), et deux
+  tableaux (regions, departements par numero) avec le prix de chaque
+  carburant et un indicateur moins cher/plus cher que la moyenne nationale.
+  Clique une ligne pour afficher son evolution.
+
+Aucune des deux pages n'embarque les donnees de station : elles sont
+chargees a la demande, par departement (stations/{dept}.json.gz,
+dept_avg/{dept}.json.gz) ou par station (data/{dept}/{id}.json.gz). A
+l'echelle de la France entiere sur 10 ans, tout charger d'un coup rendrait
+ces pages enormes ; le chargement a la demande les garde legeres quel que
+soit le nombre total de stations suivies. Chaque fichier est gzippe (le
+navigateur le decompresse via DecompressionStream, une API native, pas de
+dependance) : ca reduit encore la taille transferee/stockee d'un facteur
+~5-8 sur ce genre de donnees tres repetitives. Consequence : le site doit
+etre servi en http(s) (GitHub Pages, ou `python3 -m http.server` en local)
+— fetch() ne peut pas lire de fichiers locaux via file://.
 
 Usage : python3 build_site.py
 (a relancer apres chaque python3 collect_prices.py pour refleter les
@@ -333,25 +335,11 @@ HTML_TEMPLATE = """<!doctype html>
   .card .fuel { font-size: 0.7rem; text-transform: uppercase; color: #6b6b70; letter-spacing: .04em; }
   .card .price { font-size: 1.3rem; font-weight: 600; margin-top: 4px; }
   .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
-  .dept-avg-wrap, .national-avg-wrap {
-    background: #fff; border-radius: 10px; padding: 14px 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
-  }
-  .section-title .dim { font-weight: 400; color: #6b6b70; font-size: 0.85rem; }
-  .avg-group-title {
-    font-size: 0.7rem; text-transform: uppercase; color: #6b6b70;
-    letter-spacing: .04em; margin: 12px 0 6px;
-  }
-  .avg-group:first-child .avg-group-title { margin-top: 0; }
-  .evolution-btn {
-    margin-top: 10px; font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;
-    border: 1px solid #d8d8dc; background: #fff; color: #2980b9; cursor: pointer;
-  }
-  .evolution-btn:hover { background: #f5f6f8; }
-  .evolution-chart { margin-top: 12px; min-height: 380px; }
   .station-title { font-weight: 600; margin-bottom: 2px; }
   .station-sub { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
   #chart { min-height: 560px; }
+  .nav-link { display: inline-block; margin-bottom: 16px; font-size: 0.9rem; color: #2980b9; text-decoration: none; }
+  .nav-link:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -360,6 +348,8 @@ HTML_TEMPLATE = """<!doctype html>
   actuels et l'evolution de leurs tarifs dans le temps. Couvre la France metropolitaine (la Corse est suivie
   comme un seul departement, son code postal ne distinguant pas 2A/2B).</p>
   <div class="meta">__NB_STATIONS__ station(s) suivies sur __NB_DEPARTEMENTS__ departement(s) &middot; page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
+
+  <a class="nav-link" href="comparaison.html">Comparer les prix par departement / region / national &rarr;</a>
 
   <div class="search-wrap">
     <label for="cpInput">Code postal :</label>
@@ -376,37 +366,8 @@ HTML_TEMPLATE = """<!doctype html>
     </div>
   </div>
 
-  <div class="national-avg-wrap">
-    <h2 class="section-title">Moyenne nationale actuelle <span class="dim">(departements suivis)</span></h2>
-    <div class="cards" id="nationalAvgCards"></div>
-    <button type="button" class="evolution-btn" id="nationalEvolutionBtn">Voir l'evolution nationale</button>
-    <div class="evolution-chart" id="nationalChart" style="display:none"></div>
-  </div>
-
-  <div class="dept-avg-wrap" id="deptAvgWrap" style="display:none">
-    <h2 class="section-title">Moyennes actuelles <span id="deptAvgLabel"></span></h2>
-    <div class="avg-group">
-      <div class="avg-group-title">Departement</div>
-      <div class="cards" id="deptAvgCards"></div>
-      <button type="button" class="evolution-btn" id="deptEvolutionBtn">Voir l'evolution du departement</button>
-      <div class="evolution-chart" id="deptChart" style="display:none"></div>
-    </div>
-    <div class="avg-group">
-      <div class="avg-group-title">Region</div>
-      <div class="cards" id="regionAvgCards"></div>
-      <button type="button" class="evolution-btn" id="regionEvolutionBtn">Voir l'evolution de la region</button>
-      <div class="evolution-chart" id="regionChart" style="display:none"></div>
-    </div>
-  </div>
-
 <script>
 const NOMS_DEPARTEMENTS = __NOMS_DEPARTEMENTS__;
-const DEPT_TO_REGION = __DEPT_TO_REGION__;
-const deptLatest = __DEPT_LATEST__;
-const regionLatest = __REGION_LATEST__;
-const regionSeries = __REGION_SERIES__;
-const nationalLatest = __NATIONAL_LATEST__;
-const nationalSeries = __NATIONAL_SERIES__;
 
 const FUEL_ORDER = ['Gazole', 'SP95', 'SP98', 'E10', 'E85', 'GPLc'];
 function sortFuels(fuels) {
@@ -441,7 +402,6 @@ async function fetchGzipJson(url) {
 
 const stationsCache = new Map();
 const historyCache = new Map();
-const avgCache = new Map();
 
 async function ensureStationsLoaded(dept) {
   if (stationsCache.has(dept)) return stationsCache.get(dept);
@@ -457,27 +417,9 @@ async function ensureHistoryLoaded(sid, dept) {
   return data;
 }
 
-async function ensureAvgLoaded(dept) {
-  if (avgCache.has(dept)) return avgCache.get(dept);
-  const data = await fetchGzipJson('dept_avg/' + dept + '.json.gz');
-  avgCache.set(dept, data);
-  return data;
-}
-
 const cpInput = document.getElementById('cpInput');
-const deptAvgWrap = document.getElementById('deptAvgWrap');
-const deptAvgLabel = document.getElementById('deptAvgLabel');
-const deptAvgCards = document.getElementById('deptAvgCards');
-const regionAvgCards = document.getElementById('regionAvgCards');
-const nationalAvgCards = document.getElementById('nationalAvgCards');
 const resultsWrap = document.getElementById('resultsWrap');
 const detailsEl = document.getElementById('details');
-const nationalEvolutionBtn = document.getElementById('nationalEvolutionBtn');
-const nationalChartEl = document.getElementById('nationalChart');
-const deptEvolutionBtn = document.getElementById('deptEvolutionBtn');
-const deptChartEl = document.getElementById('deptChart');
-const regionEvolutionBtn = document.getElementById('regionEvolutionBtn');
-const regionChartEl = document.getElementById('regionChart');
 
 cpInput.addEventListener('input', () => {
   const digits = cpInput.value.replace(/\\D/g, '').slice(0, 5);
@@ -486,142 +428,8 @@ cpInput.addEventListener('input', () => {
 });
 
 function resetResults(message) {
-  deptAvgWrap.style.display = 'none';
   resultsWrap.innerHTML = `<p class="empty">${message}</p>`;
 }
-
-function renderAvgCards(container, avgs, emptyMessage) {
-  if (!avgs || Object.keys(avgs).length === 0) {
-    container.innerHTML = `<p class="empty">${emptyMessage}</p>`;
-    return;
-  }
-  container.innerHTML = '';
-  sortFuels(Object.keys(avgs)).forEach(fuel => {
-    const d = avgs[fuel];
-    const div = document.createElement('div');
-    div.className = 'card';
-    div.innerHTML = `<div class="fuel">${fuel}</div>
-      <div class="price">${d.avg.toFixed(3)} €</div>
-      <div class="date">moyenne sur ${d.n} station(s)</div>`;
-    container.appendChild(div);
-  });
-}
-
-renderAvgCards(nationalAvgCards, nationalLatest, "Pas encore de prix connus.");
-
-// Graphique d'evolution d'un niveau (departement, region ou national) : ses
-// propres tendances uniquement, pas de superposition avec une station.
-function renderSeriesChart(divId, seriesByFuel) {
-  const el = document.getElementById(divId);
-  const fuels = sortFuels(Object.keys(seriesByFuel || {}).filter(f => seriesByFuel[f] && seriesByFuel[f].length));
-  if (fuels.length === 0) {
-    el.innerHTML = '<p class="empty">Pas encore d\\'historique disponible.</p>';
-    return;
-  }
-  const idxRef = { i: 0 };
-  const traces = fuels.map(fuel => ({
-    x: seriesByFuel[fuel].map(p => parseDate(p.date)),
-    y: seriesByFuel[fuel].map(p => p.avg),
-    name: fuel,
-    mode: 'lines',
-    line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 2 },
-    hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
-  }));
-  try {
-    if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
-    Plotly.newPlot(divId, traces, {
-      height: 380,
-      margin: { t: 10, r: 20, l: 55, b: 60 },
-      hovermode: 'x unified',
-      legend: { orientation: 'h', y: -0.25 },
-      xaxis: { type: 'date', rangeslider: { visible: true } },
-      yaxis: { title: 'Prix moyen (EUR / litre)' },
-    }, { responsive: true, displaylogo: false });
-  } catch (e) {
-    el.innerHTML = `<p class="empty">Graphique indisponible : ${e.message}</p>`;
-    console.error(e);
-  }
-}
-
-nationalEvolutionBtn.addEventListener('click', () => {
-  const showing = nationalChartEl.style.display !== 'none';
-  if (showing) {
-    nationalChartEl.style.display = 'none';
-    nationalEvolutionBtn.textContent = "Voir l'evolution nationale";
-    return;
-  }
-  nationalChartEl.style.display = 'block';
-  nationalEvolutionBtn.textContent = "Masquer l'evolution nationale";
-  if (!nationalChartEl.dataset.rendered) {
-    renderSeriesChart('nationalChart', nationalSeries);
-    nationalChartEl.dataset.rendered = '1';
-  }
-});
-
-let currentDept = null;
-let currentRegion = null;
-
-// Moyennes departement + region pour une station donnee (code postal de la
-// station selectionnee, ou du departement recherche avant toute selection).
-function showLocalAvg(dept) {
-  currentDept = dept;
-  currentRegion = DEPT_TO_REGION[dept] || null;
-
-  deptAvgLabel.textContent = NOMS_DEPARTEMENTS[dept]
-    ? `(${dept} - ${NOMS_DEPARTEMENTS[dept]}${currentRegion ? ' / ' + currentRegion : ''})`
-    : `(${dept})`;
-  deptAvgWrap.style.display = 'block';
-  renderAvgCards(deptAvgCards, deptLatest[dept], "Pas encore de prix connus pour ce departement.");
-  renderAvgCards(regionAvgCards, currentRegion ? regionLatest[currentRegion] : null, "Pas encore de prix connus pour cette region.");
-
-  // Le departement/la region ont pu changer : referme les graphiques
-  // ouverts pour un contexte precedent plutot que de laisser un graphique
-  // perime affiche.
-  deptChartEl.style.display = 'none';
-  delete deptChartEl.dataset.renderedFor;
-  deptEvolutionBtn.textContent = "Voir l'evolution du departement";
-  regionChartEl.style.display = 'none';
-  delete regionChartEl.dataset.renderedFor;
-  regionEvolutionBtn.textContent = "Voir l'evolution de la region";
-}
-
-deptEvolutionBtn.addEventListener('click', async () => {
-  if (!currentDept) return;
-  const showing = deptChartEl.style.display !== 'none';
-  if (showing) {
-    deptChartEl.style.display = 'none';
-    deptEvolutionBtn.textContent = "Voir l'evolution du departement";
-    return;
-  }
-  deptChartEl.style.display = 'block';
-  deptEvolutionBtn.textContent = "Masquer l'evolution du departement";
-  if (deptChartEl.dataset.renderedFor === currentDept) return;
-  deptChartEl.innerHTML = '<p class="empty">Chargement...</p>';
-  let series;
-  try {
-    series = await ensureAvgLoaded(currentDept);
-  } catch (e) {
-    deptChartEl.innerHTML = `<p class="empty">${e.message}</p>`;
-    return;
-  }
-  renderSeriesChart('deptChart', series);
-  deptChartEl.dataset.renderedFor = currentDept;
-});
-
-regionEvolutionBtn.addEventListener('click', () => {
-  if (!currentRegion) return;
-  const showing = regionChartEl.style.display !== 'none';
-  if (showing) {
-    regionChartEl.style.display = 'none';
-    regionEvolutionBtn.textContent = "Voir l'evolution de la region";
-    return;
-  }
-  regionChartEl.style.display = 'block';
-  regionEvolutionBtn.textContent = "Masquer l'evolution de la region";
-  if (regionChartEl.dataset.renderedFor === currentRegion) return;
-  renderSeriesChart('regionChart', regionSeries[currentRegion] || {});
-  regionChartEl.dataset.renderedFor = currentRegion;
-});
 
 async function onSearch(cp) {
   if (cp.length < 2) {
@@ -633,8 +441,6 @@ async function onSearch(cp) {
     resetResults(`Departement ${dept} non couvert.`);
     return;
   }
-
-  showLocalAvg(dept);
 
   resultsWrap.innerHTML = '<p class="empty">Chargement des stations...</p>';
   let all;
@@ -693,10 +499,7 @@ function colorFor(name, idxRef) {
 }
 
 async function selectStation(station) {
-  // Reflete explicitement le departement/la region de la station selectionnee
-  // (et pas seulement du code postal tape dans la recherche).
   const dept = station.cp.slice(0, 2);
-  showLocalAvg(dept);
 
   detailsEl.innerHTML = `
     <div class="station-title">${station.adresse}</div>
@@ -779,6 +582,315 @@ async function selectStation(station) {
 """
 
 
+HTML_TEMPLATE_COMPARE = """<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparaison des prix des carburants - France</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 24px; background: #f5f6f8; color: #1c1c1e;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 6px 0; }
+  h2.section-title { font-size: 1rem; margin: 0 0 12px 0; }
+  .section-title .dim { font-weight: 400; color: #6b6b70; font-size: 0.85rem; }
+  .description { color: #444; font-size: 0.9rem; max-width: 760px; margin: 0 0 10px 0; line-height: 1.4; }
+  .meta { color: #6b6b70; font-size: 0.85rem; margin-bottom: 16px; }
+  .nav-link { display: inline-block; margin-bottom: 16px; font-size: 0.9rem; color: #2980b9; text-decoration: none; }
+  .nav-link:hover { text-decoration: underline; }
+  .empty { color: #6b6b70; }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+  .card {
+    background: #f5f6f8; border-radius: 10px; padding: 12px 16px; min-width: 100px;
+  }
+  .card .fuel { font-size: 0.7rem; text-transform: uppercase; color: #6b6b70; letter-spacing: .04em; }
+  .card .price { font-size: 1.3rem; font-weight: 600; margin-top: 4px; }
+  .card .date { font-size: 0.65rem; color: #9a9a9e; margin-top: 2px; }
+  .panel {
+    background: #fff; border-radius: 10px; padding: 14px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px;
+  }
+  .evolution-btn {
+    margin-top: 10px; font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid #d8d8dc; background: #fff; color: #2980b9; cursor: pointer;
+  }
+  .evolution-btn:hover { background: #f5f6f8; }
+  .evolution-chart { margin-top: 12px; min-height: 380px; }
+  .table-scroll { overflow-x: auto; }
+  table.cmp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; white-space: nowrap; }
+  table.cmp-table th, table.cmp-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid #eee; }
+  table.cmp-table th { color: #6b6b70; font-weight: 600; }
+  table.cmp-table tbody tr { cursor: pointer; }
+  table.cmp-table tbody tr:hover { background: #f5f6f8; }
+  table.cmp-table tbody tr.selected { background: #eaf2ff; }
+  td.na { color: #c3c3c8; }
+  .ind { font-size: 0.75rem; margin-left: 3px; }
+  .ind.cheaper { color: #1e8e3e; }
+  .ind.pricier { color: #c0392b; }
+  .evolution-detail {
+    background: #fff; border-radius: 10px; padding: 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px;
+  }
+  #evolutionDetailChart { min-height: 400px; }
+</style>
+</head>
+<body>
+  <h1>Comparaison des prix des carburants - France</h1>
+  <p class="description">Moyenne nationale actuelle, et prix moyen par region et par departement, avec un
+  indicateur (&#9660; moins cher, &#9650; plus cher) par rapport a la moyenne nationale de chaque carburant.
+  Clique une ligne pour voir son evolution dans le temps.</p>
+  <div class="meta">page generee le __GENERATED__ &middot; source : flux officiel donnees.roulez-eco.fr</div>
+
+  <a class="nav-link" href="index.html">&larr; Recherche par code postal</a>
+
+  <div class="panel">
+    <h2 class="section-title">Moyenne nationale actuelle <span class="dim">(departements suivis)</span></h2>
+    <div class="cards" id="nationalAvgCards"></div>
+    <button type="button" class="evolution-btn" id="nationalEvolutionBtn">Voir l'evolution nationale</button>
+    <div class="evolution-chart" id="nationalChart" style="display:none"></div>
+  </div>
+
+  <div class="panel">
+    <h2 class="section-title">Par region</h2>
+    <div class="table-scroll">
+      <table class="cmp-table" id="regionTable">
+        <thead><tr id="regionTableHead"></tr></thead>
+        <tbody id="regionTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 class="section-title">Par departement</h2>
+    <div class="table-scroll">
+      <table class="cmp-table" id="deptTable">
+        <thead><tr id="deptTableHead"></tr></thead>
+        <tbody id="deptTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="evolution-detail" id="evolutionDetail" style="display:none">
+    <h2 class="section-title" id="evolutionDetailTitle"></h2>
+    <div id="evolutionDetailChart"></div>
+  </div>
+
+<script>
+const NOMS_DEPARTEMENTS = __NOMS_DEPARTEMENTS__;
+const deptLatest = __DEPT_LATEST__;
+const regionLatest = __REGION_LATEST__;
+const regionSeries = __REGION_SERIES__;
+const nationalLatest = __NATIONAL_LATEST__;
+const nationalSeries = __NATIONAL_SERIES__;
+
+const FUEL_ORDER = ['Gazole', 'SP95', 'SP98', 'E10', 'E85', 'GPLc'];
+function sortFuels(fuels) {
+  return fuels.slice().sort((a, b) => {
+    const ia = FUEL_ORDER.indexOf(a), ib = FUEL_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+}
+
+function parseDate(s) {
+  return new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+}
+
+// Chaque chunk de donnees est un petit fichier JSON gzippe : fetch() recupere
+// les octets bruts, DecompressionStream (API native du navigateur, aucune
+// dependance) les decompresse a la volee. Necessite d'etre servi en http(s).
+async function fetchGzipJson(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('impossible de charger ' + url + ' (HTTP ' + resp.status + ')');
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error("ce navigateur ne supporte pas DecompressionStream (mets-le a jour)");
+  }
+  const stream = resp.body.pipeThrough(new DecompressionStream('gzip'));
+  const text = await new Response(stream).text();
+  return JSON.parse(text);
+}
+
+const avgCache = new Map();
+async function ensureAvgLoaded(dept) {
+  if (avgCache.has(dept)) return avgCache.get(dept);
+  const data = await fetchGzipJson('dept_avg/' + dept + '.json.gz');
+  avgCache.set(dept, data);
+  return data;
+}
+
+const colors = {
+  Gazole: '#e74c3c', SP95: '#2980b9', SP98: '#8e44ad',
+  E10: '#27ae60', E85: '#16a085', GPLc: '#f39c12'
+};
+const fallbackColors = ['#e74c3c','#2980b9','#8e44ad','#27ae60','#16a085','#f39c12','#7f8c8d'];
+
+function colorFor(name, idxRef) {
+  if (colors[name]) return colors[name];
+  const c = fallbackColors[idxRef.i % fallbackColors.length];
+  idxRef.i++;
+  return c;
+}
+
+const fuelsAvailable = sortFuels(Object.keys(nationalLatest));
+
+function renderAvgCards(container, avgs) {
+  if (!avgs || Object.keys(avgs).length === 0) {
+    container.innerHTML = '<p class="empty">Pas encore de prix connus.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  sortFuels(Object.keys(avgs)).forEach(fuel => {
+    const d = avgs[fuel];
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<div class="fuel">${fuel}</div>
+      <div class="price">${d.avg.toFixed(3)} €</div>
+      <div class="date">moyenne sur ${d.n} station(s)</div>`;
+    container.appendChild(div);
+  });
+}
+
+renderAvgCards(document.getElementById('nationalAvgCards'), nationalLatest);
+
+// Graphique d'evolution d'un niveau (departement, region ou national) : ses
+// propres tendances uniquement.
+function renderSeriesChart(divId, seriesByFuel) {
+  const el = document.getElementById(divId);
+  const fuels = sortFuels(Object.keys(seriesByFuel || {}).filter(f => seriesByFuel[f] && seriesByFuel[f].length));
+  if (fuels.length === 0) {
+    el.innerHTML = '<p class="empty">Pas encore d\\'historique disponible.</p>';
+    return;
+  }
+  const idxRef = { i: 0 };
+  const traces = fuels.map(fuel => ({
+    x: seriesByFuel[fuel].map(p => parseDate(p.date)),
+    y: seriesByFuel[fuel].map(p => p.avg),
+    name: fuel,
+    mode: 'lines',
+    line: { color: colorFor(fuel, idxRef), shape: 'hv', width: 2 },
+    hovertemplate: '%{y:.3f} €<br>%{x|%d/%m/%Y}<extra>' + fuel + '</extra>',
+  }));
+  try {
+    if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    Plotly.newPlot(divId, traces, {
+      height: 380,
+      margin: { t: 10, r: 20, l: 55, b: 60 },
+      hovermode: 'x unified',
+      legend: { orientation: 'h', y: -0.25 },
+      xaxis: { type: 'date', rangeslider: { visible: true } },
+      yaxis: { title: 'Prix moyen (EUR / litre)' },
+    }, { responsive: true, displaylogo: false });
+  } catch (e) {
+    el.innerHTML = `<p class="empty">Graphique indisponible : ${e.message}</p>`;
+    console.error(e);
+  }
+}
+
+const nationalEvolutionBtn = document.getElementById('nationalEvolutionBtn');
+const nationalChartEl = document.getElementById('nationalChart');
+nationalEvolutionBtn.addEventListener('click', () => {
+  const showing = nationalChartEl.style.display !== 'none';
+  if (showing) {
+    nationalChartEl.style.display = 'none';
+    nationalEvolutionBtn.textContent = "Voir l'evolution nationale";
+    return;
+  }
+  nationalChartEl.style.display = 'block';
+  nationalEvolutionBtn.textContent = "Masquer l'evolution nationale";
+  if (!nationalChartEl.dataset.rendered) {
+    renderSeriesChart('nationalChart', nationalSeries);
+    nationalChartEl.dataset.rendered = '1';
+  }
+});
+
+function indicatorFor(avg, nationalAvg) {
+  const diff = avg - nationalAvg;
+  if (Math.abs(diff) < 0.0005) return '';
+  return diff < 0
+    ? ' <span class="ind cheaper">&#9660;</span>'
+    : ' <span class="ind pricier">&#9650;</span>';
+}
+
+function fuelCell(latestForRow, fuel) {
+  const d = latestForRow && latestForRow[fuel];
+  if (!d) return '<td class="na">—</td>';
+  const nat = nationalLatest[fuel];
+  return `<td>${d.avg.toFixed(3)} €${nat ? indicatorFor(d.avg, nat.avg) : ''}</td>`;
+}
+
+function buildHeadRow(firstLabel) {
+  return `<th>${firstLabel}</th>` + fuelsAvailable.map(f => `<th>${f}</th>`).join('');
+}
+
+document.getElementById('deptTableHead').innerHTML = '<th>N&deg;</th>' + buildHeadRow('Departement');
+document.getElementById('regionTableHead').innerHTML = buildHeadRow('Region');
+
+const deptTableBody = document.getElementById('deptTableBody');
+Object.keys(NOMS_DEPARTEMENTS).sort().forEach(dept => {
+  const cells = fuelsAvailable.map(f => fuelCell(deptLatest[dept], f)).join('');
+  const tr = document.createElement('tr');
+  tr.className = 'cmp-row';
+  tr.dataset.type = 'dept';
+  tr.dataset.key = dept;
+  tr.innerHTML = `<td>${dept}</td><td>${NOMS_DEPARTEMENTS[dept]}</td>${cells}`;
+  deptTableBody.appendChild(tr);
+});
+
+const regionTableBody = document.getElementById('regionTableBody');
+Object.keys(regionLatest).sort().forEach(region => {
+  const cells = fuelsAvailable.map(f => fuelCell(regionLatest[region], f)).join('');
+  const tr = document.createElement('tr');
+  tr.className = 'cmp-row';
+  tr.dataset.type = 'region';
+  tr.dataset.key = region;
+  tr.innerHTML = `<td>${region}</td>${cells}`;
+  regionTableBody.appendChild(tr);
+});
+
+const evolutionDetail = document.getElementById('evolutionDetail');
+const evolutionDetailTitle = document.getElementById('evolutionDetailTitle');
+const evolutionDetailChart = document.getElementById('evolutionDetailChart');
+
+document.querySelectorAll('.cmp-row').forEach(row => {
+  row.addEventListener('click', async () => {
+    document.querySelectorAll('.cmp-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+    const type = row.dataset.type;
+    const key = row.dataset.key;
+
+    evolutionDetail.style.display = 'block';
+    evolutionDetailTitle.textContent = type === 'dept'
+      ? `Evolution - ${key} ${NOMS_DEPARTEMENTS[key]}`
+      : `Evolution - ${key}`;
+    evolutionDetailChart.innerHTML = '<p class="empty">Chargement...</p>';
+
+    let series;
+    if (type === 'region') {
+      series = regionSeries[key] || {};
+    } else {
+      try {
+        series = await ensureAvgLoaded(key);
+      } catch (e) {
+        evolutionDetailChart.innerHTML = `<p class="empty">${e.message}</p>`;
+        return;
+      }
+    }
+    renderSeriesChart('evolutionDetailChart', series);
+    evolutionDetail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+});
+</script>
+</body>
+</html>
+"""
+
+
 def main():
     config = load_config()
     departements = config["departements"]
@@ -789,6 +901,7 @@ def main():
     stations_dir = os.path.join(BASE_DIR, config["stations_dir"])
     dept_avg_dir = os.path.join(BASE_DIR, config["dept_avg_dir"])
     site_path = os.path.join(BASE_DIR, config["site_filename"])
+    comparison_path = os.path.join(BASE_DIR, config["comparison_filename"])
 
     stations_rows = read_csv_rows(stations_path)
     stations_by_id = {r["station_id"]: r for r in stations_rows}
@@ -820,22 +933,34 @@ def main():
 
     nb_stations = sum(len(v) for v in by_dept.values())
 
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+
     html = HTML_TEMPLATE.replace("__NOMS_DEPARTEMENTS__", json.dumps(departements, ensure_ascii=False))
-    html = html.replace("__DEPT_TO_REGION__", json.dumps(dept_to_region, ensure_ascii=False))
-    html = html.replace("__DEPT_LATEST__", json.dumps(dept_latest, ensure_ascii=False))
-    html = html.replace("__REGION_LATEST__", json.dumps(region_latest, ensure_ascii=False))
-    html = html.replace("__REGION_SERIES__", json.dumps(region_series_by_region, ensure_ascii=False))
-    html = html.replace("__NATIONAL_LATEST__", json.dumps(national_latest, ensure_ascii=False))
-    html = html.replace("__NATIONAL_SERIES__", json.dumps(national_series, ensure_ascii=False))
     html = html.replace("__NB_STATIONS__", str(nb_stations))
     html = html.replace("__NB_DEPARTEMENTS__", str(len(by_dept)))
-    html = html.replace("__GENERATED__", datetime.now().strftime("%d/%m/%Y %H:%M"))
+    html = html.replace("__GENERATED__", generated)
 
     with open(site_path, "w", encoding="utf-8") as f:
         f.write(html)
 
+    html_compare = HTML_TEMPLATE_COMPARE.replace(
+        "__NOMS_DEPARTEMENTS__", json.dumps(departements, ensure_ascii=False)
+    )
+    html_compare = html_compare.replace("__DEPT_LATEST__", json.dumps(dept_latest, ensure_ascii=False))
+    html_compare = html_compare.replace("__REGION_LATEST__", json.dumps(region_latest, ensure_ascii=False))
+    html_compare = html_compare.replace(
+        "__REGION_SERIES__", json.dumps(region_series_by_region, ensure_ascii=False)
+    )
+    html_compare = html_compare.replace("__NATIONAL_LATEST__", json.dumps(national_latest, ensure_ascii=False))
+    html_compare = html_compare.replace("__NATIONAL_SERIES__", json.dumps(national_series, ensure_ascii=False))
+    html_compare = html_compare.replace("__GENERATED__", generated)
+
+    with open(comparison_path, "w", encoding="utf-8") as f:
+        f.write(html_compare)
+
     print(
-        f"Site genere : {config['site_filename']} ({nb_stations} station(s) sur {len(by_dept)} departement(s), "
+        f"Site genere : {config['site_filename']} + {config['comparison_filename']} "
+        f"({nb_stations} station(s) sur {len(by_dept)} departement(s), "
         f"{skipped_no_price} ignoree(s) sans prix connu, {skipped_no_coords} ignoree(s) sans coordonnees)."
     )
 
