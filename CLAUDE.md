@@ -200,9 +200,22 @@ a constant for the national bucket).
 of `HTML_TEMPLATE` / `HTML_TEMPLATE_COMPARE` is a Python string with
 `__PLACEHOLDER__` markers substituted via `.replace()` in `main()`, then
 written to `index.html` / `comparaison.html` respectively. Charts are
-Plotly.js loaded from a CDN (`plotly.js-dist-min`) with no bundler. All
-UI/search/chart/table logic is inline `<script>` in the templates — edit
-the Python string constants directly.
+Plotly.js loaded from a CDN (`plotly.js-dist-min`), pinned to an exact
+version with a Subresource Integrity hash (`integrity="sha384-..."`) rather
+than a floating `@2` tag — protects against a compromised/tampered CDN
+response; bump both the version and the hash together when upgrading (`curl`
+the new file, `openssl dgst -sha384 -binary | openssl base64 -A`). The tag
+also has `defer`: safe because the inline `<script>` that follows only calls
+`Plotly.*` from inside event handlers, never at top level. No bundler — all
+UI/search/chart/table logic is inline `<script>` in the templates, edit the
+Python string constants directly.
+
+**Untrusted text fields are HTML-escaped before `innerHTML`.** Station
+`adresse`/`ville`/`cp` come from the government feed and `marque` comes from
+OpenStreetMap (editable by anyone) — both templates route them through a
+shared `escapeHtml()` before interpolating into any `innerHTML` string, to
+close off stored-XSS via a malicious address or brand tag. Apply the same
+treatment to any new field pulled from those sources.
 
 **Adding/removing a département.** Edit the `departements` object in
 `config.json` (2-digit code → display name), clear `stations.csv`, `data/`,

@@ -299,7 +299,9 @@ HTML_TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recherche des prix des carburants - France</title>
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.3/plotly.min.js"
+  integrity="sha384-MqL7Cy3itNqCI1Wlc926K0XhyRKJ/NMqTaytIIEB+QIdInOploxqRIHRKLlhPykM"
+  crossorigin="anonymous" defer></script>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -419,6 +421,15 @@ function sortFuels(fuels) {
 
 function parseDate(s) {
   return new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+}
+
+// Les champs texte externes (adresse/ville du flux gouvernemental, marque
+// venant d'OpenStreetMap qui est modifiable par n'importe qui) ne sont pas
+// consideres fiables : on echappe avant toute insertion via innerHTML pour
+// eviter qu'une valeur malveillante ne s'execute comme du HTML/JS.
+const ESCAPE_HTML_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ESCAPE_HTML_MAP[c]);
 }
 
 // Chaque chunk de donnees est un petit fichier JSON gzippe : fetch() recupere
@@ -542,7 +553,7 @@ async function renderFranceMap(stations) {
       mode: 'markers',
       lat: withCoords.map(s => s.latitude),
       lon: withCoords.map(s => s.longitude),
-      text: withCoords.map(s => `<b>${s.marque || s.adresse}</b><br>${s.adresse}<br>${s.cp} ${s.ville}`),
+      text: withCoords.map(s => `<b>${escapeHtml(s.marque || s.adresse)}</b><br>${escapeHtml(s.adresse)}<br>${escapeHtml(s.cp)} ${escapeHtml(s.ville)}`),
       customdata: withCoords.map(s => s.id),
       hoverinfo: 'text',
       marker: { size: 6, color: '#2980b9', opacity: 0.7 },
@@ -635,9 +646,9 @@ function renderResults(all, cp) {
     `</div>`;
   html += shown.map(s => `
     <button type="button" class="result-row" data-id="${s.id}">
-      ${s.marque ? `<div class="result-brand">${s.marque}</div>` : ''}
-      <div class="result-title">${s.adresse}</div>
-      <div class="result-sub">${s.cp} ${s.ville}</div>
+      ${s.marque ? `<div class="result-brand">${escapeHtml(s.marque)}</div>` : ''}
+      <div class="result-title">${escapeHtml(s.adresse)}</div>
+      <div class="result-sub">${escapeHtml(s.cp)} ${escapeHtml(s.ville)}</div>
     </button>
   `).join('');
   resultsWrap.style.display = 'block';
@@ -669,8 +680,8 @@ async function selectStation(station) {
   const dept = station.cp.slice(0, 2);
 
   detailsEl.innerHTML = `
-    <div class="station-title">${station.adresse}${station.marque ? ' <span class="brand-badge">' + station.marque + '</span>' : ''}</div>
-    <div class="station-sub">${station.cp} ${station.ville} &middot; id ${station.id}</div>
+    <div class="station-title">${escapeHtml(station.adresse)}${station.marque ? ' <span class="brand-badge">' + escapeHtml(station.marque) + '</span>' : ''}</div>
+    <div class="station-sub">${escapeHtml(station.cp)} ${escapeHtml(station.ville)} &middot; id ${escapeHtml(station.id)}</div>
     <div class="station-map-wrap"><div id="stationMap"></div></div>
     <div class="cards" id="cards"></div>
     <h2 class="section-title">Évolution (données disponibles)</h2>
@@ -684,7 +695,7 @@ async function selectStation(station) {
     const p = station.prices[fuel];
     const div = document.createElement('div');
     div.className = 'card';
-    div.innerHTML = `<div class="fuel">${fuel}</div>
+    div.innerHTML = `<div class="fuel">${escapeHtml(fuel)}</div>
       <div class="price">${parseFloat(p.prix_eur).toFixed(3)} €</div>
       <div class="date">maj ${parseDate(p.maj_officielle).toLocaleString('fr-FR')}</div>`;
     cardsEl.appendChild(div);
@@ -762,7 +773,9 @@ HTML_TEMPLATE_COMPARE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Comparaison des prix des carburants - France</title>
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.3/plotly.min.js"
+  integrity="sha384-MqL7Cy3itNqCI1Wlc926K0XhyRKJ/NMqTaytIIEB+QIdInOploxqRIHRKLlhPykM"
+  crossorigin="anonymous" defer></script>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -864,6 +877,15 @@ function parseDate(s) {
   return new Date(s.includes('T') ? s : s.replace(' ', 'T'));
 }
 
+// Les champs texte externes (adresse/ville du flux gouvernemental, marque
+// venant d'OpenStreetMap qui est modifiable par n'importe qui) ne sont pas
+// consideres fiables : on echappe avant toute insertion via innerHTML pour
+// eviter qu'une valeur malveillante ne s'execute comme du HTML/JS.
+const ESCAPE_HTML_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ESCAPE_HTML_MAP[c]);
+}
+
 // Chaque chunk de donnees est un petit fichier JSON gzippe : fetch() recupere
 // les octets bruts, DecompressionStream (API native du navigateur, aucune
 // dependance) les decompresse a la volee. Necessite d'etre servi en http(s).
@@ -911,7 +933,7 @@ function renderAvgCards(container, avgs) {
     const d = avgs[fuel];
     const div = document.createElement('div');
     div.className = 'card';
-    div.innerHTML = `<div class="fuel">${fuel}</div>
+    div.innerHTML = `<div class="fuel">${escapeHtml(fuel)}</div>
       <div class="price">${d.avg.toFixed(3)} €</div>
       <div class="date">moyenne sur ${d.n} station(s)</div>`;
     container.appendChild(div);
@@ -991,7 +1013,7 @@ function fuelCell(latestForRow, fuel) {
 }
 
 function buildHeadRow(firstLabel) {
-  return `<th>${firstLabel}</th>` + fuelsAvailable.map(f => `<th>${f}</th>`).join('');
+  return `<th>${firstLabel}</th>` + fuelsAvailable.map(f => `<th>${escapeHtml(f)}</th>`).join('');
 }
 
 document.getElementById('deptTableHead').innerHTML = '<th>N&deg;</th>' + buildHeadRow('Departement');
