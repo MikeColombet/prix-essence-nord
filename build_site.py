@@ -319,7 +319,6 @@ HTML_TEMPLATE = """<!doctype html>
     font-size: 1.1rem; padding: 8px 10px; border-radius: 6px; border: 1px solid #d8d8dc;
     width: 200px; max-width: 100%;
   }
-  .search-hint { font-size: 0.8rem; color: #6b6b70; margin-top: 6px; }
   .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
   .mode-tab {
     font-size: 0.9rem; padding: 8px 16px; border-radius: 8px; border: 1px solid #d8d8dc;
@@ -328,11 +327,11 @@ HTML_TEMPLATE = """<!doctype html>
   .mode-tab:hover { background: #f5f6f8; }
   .mode-tab.active { background: #2980b9; color: #fff; border-color: #2980b9; }
   .map-wrap {
-    background: #fff; border-radius: 10px; padding: 12px; max-width: 700px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
+    background: #fff; border-radius: 10px; padding: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); flex: 1 1 420px; min-width: 280px; max-width: 480px;
   }
   #franceMap { width: 100%; height: 420px; }
-  @media (max-width: 600px) { #franceMap { height: 360px; } }
+  @media (max-width: 600px) { #franceMap { height: 360px; } .map-wrap { max-width: none; } }
   .station-map-wrap { margin-bottom: 16px; }
   #stationMap { width: 100%; height: 220px; border-radius: 8px; overflow: hidden; }
   .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
@@ -392,16 +391,12 @@ HTML_TEMPLATE = """<!doctype html>
   <div class="search-wrap" id="cpSearchWrap">
     <label for="cpInput">Code postal :</label>
     <input id="cpInput" type="text" inputmode="numeric" autocomplete="off" placeholder="ex : 59700" maxlength="5">
-    <div class="search-hint" id="searchHint">Tape au moins les 2 premiers chiffres d'un code postal pour voir les stations du departement.</div>
-  </div>
-
-  <div class="map-wrap" id="mapWrap" style="display:none">
-    <div id="franceMap"><p class="empty">Chargement des stations...</p></div>
   </div>
 
   <div class="layout">
-    <div class="results-wrap" id="resultsWrap">
-      <p class="empty">Cherche un code postal pour afficher les stations.</p>
+    <div class="results-wrap" id="resultsWrap" style="display:none"></div>
+    <div class="map-wrap" id="mapWrap" style="display:none">
+      <div id="franceMap"><p class="empty">Chargement des stations...</p></div>
     </div>
     <div class="details" id="details">
       <p class="empty">Selectionne une station dans la liste pour voir ses prix et son evolution.</p>
@@ -489,7 +484,13 @@ cpInput.addEventListener('input', () => {
 });
 
 function resetResults(message) {
+  resultsWrap.style.display = 'block';
   resultsWrap.innerHTML = `<p class="empty">${message}</p>`;
+}
+
+function clearResults() {
+  resultsWrap.style.display = 'none';
+  resultsWrap.innerHTML = '';
 }
 
 let mapRendered = false;
@@ -499,7 +500,7 @@ modeTabCp.addEventListener('click', () => {
   modeTabMap.classList.remove('active');
   cpSearchWrap.style.display = 'block';
   mapWrap.style.display = 'none';
-  resetResults("Tape au moins les 2 premiers chiffres d'un code postal.");
+  clearResults();
 });
 
 modeTabMap.addEventListener('click', async () => {
@@ -507,7 +508,7 @@ modeTabMap.addEventListener('click', async () => {
   modeTabCp.classList.remove('active');
   cpSearchWrap.style.display = 'none';
   mapWrap.style.display = 'block';
-  resultsWrap.innerHTML = '<p class="empty">Clique une station sur la carte pour voir ses prix et son evolution.</p>';
+  clearResults();
 
   if (mapRendered) return;
   let allStations;
@@ -597,7 +598,7 @@ function renderStationMap(station) {
 
 async function onSearch(cp) {
   if (cp.length < 2) {
-    resetResults("Tape au moins les 2 premiers chiffres d'un code postal.");
+    clearResults();
     return;
   }
   const dept = cp.slice(0, 2);
@@ -606,12 +607,12 @@ async function onSearch(cp) {
     return;
   }
 
-  resultsWrap.innerHTML = '<p class="empty">Chargement des stations...</p>';
+  resetResults("Chargement des stations...");
   let all;
   try {
     all = await ensureStationsLoaded(dept);
   } catch (e) {
-    resultsWrap.innerHTML = `<p class="empty">${e.message}</p>`;
+    resetResults(e.message);
     return;
   }
 
@@ -624,7 +625,7 @@ function renderResults(all, cp) {
   const matches = all.filter(s => s.cp.startsWith(cp)).sort((a, b) => a.adresse.localeCompare(b.adresse));
 
   if (matches.length === 0) {
-    resultsWrap.innerHTML = '<p class="empty">Aucune station trouvee pour ce code postal.</p>';
+    resetResults("Aucune station trouvee pour ce code postal.");
     return;
   }
 
@@ -639,6 +640,7 @@ function renderResults(all, cp) {
       <div class="result-sub">${s.cp} ${s.ville}</div>
     </button>
   `).join('');
+  resultsWrap.style.display = 'block';
   resultsWrap.innerHTML = html;
   resultsWrap.querySelectorAll('.result-row').forEach(btn => {
     btn.addEventListener('click', () => {
