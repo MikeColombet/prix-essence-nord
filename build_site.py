@@ -334,7 +334,8 @@ HTML_TEMPLATE = """<!doctype html>
   }
   .result-row:hover { background: #f5f6f8; }
   .result-row.selected { background: #eaf2ff; }
-  .result-title { font-weight: 600; font-size: 0.9rem; }
+  .result-brand { font-weight: 700; font-size: 1.05rem; margin-bottom: 2px; }
+  .result-title { font-weight: 500; font-size: 0.85rem; color: #444; }
   .result-sub { color: #6b6b70; font-size: 0.8rem; margin-top: 2px; }
   .details {
     background: #fff; border-radius: 10px; padding: 18px;
@@ -487,8 +488,9 @@ function renderResults(all, cp) {
     `</div>`;
   html += shown.map(s => `
     <button type="button" class="result-row" data-id="${s.id}">
+      ${s.marque ? `<div class="result-brand">${s.marque}</div>` : ''}
       <div class="result-title">${s.adresse}</div>
-      <div class="result-sub">${s.cp} ${s.ville}${s.marque ? ' &middot; <span class="brand-badge">' + s.marque + '</span>' : ''}</div>
+      <div class="result-sub">${s.cp} ${s.ville}</div>
     </button>
   `).join('');
   resultsWrap.innerHTML = html;
