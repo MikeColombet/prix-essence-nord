@@ -2,8 +2,9 @@
 
 Deux pages statiques, générées à partir des mêmes données, chacune avec un
 objectif unique :
-- `index.html` — recherche de stations par code postal : prix actuels et
-  évolution sur 10 ans d'une station.
+- `index.html` — recherche de stations, au choix par code postal ou sur une
+  carte de France (~12 200 stations) : prix actuels et évolution sur 10 ans
+  d'une station.
 - `comparaison.html` — moyenne nationale actuelle (et son évolution), et un
   tableau des départements (triés par numéro, en-tête figé au défilement)
   avec le prix de chaque carburant et un indicateur moins cher/plus cher
@@ -95,11 +96,15 @@ python3 build_site.py      # genere/actualise le site
 python3 -m http.server     # sert le site en local (necessaire, voir plus haut)
 ```
 
-Ouvre ensuite `http://localhost:8000/`, tape un code postal (au moins les 2
-premiers chiffres) pour voir les stations du département, puis clique sur
-une station pour voir ses prix actuels et son évolution. Depuis cette page,
-un lien mène à `comparaison.html` pour comparer les prix par département
-et national.
+Ouvre ensuite `http://localhost:8000/`. Deux façons de trouver une station :
+- **Par code postal** : tape au moins les 2 premiers chiffres pour voir les
+  stations du département.
+- **Sur la carte** : bascule sur l'onglet correspondant, la carte de France
+  (~12 200 stations) se charge (quelques secondes), clique un marqueur.
+
+Dans les deux cas, clique une station pour voir ses prix actuels et son
+évolution. Depuis cette page, un lien mène à `comparaison.html` pour
+comparer les prix par département et national.
 
 À prévoir au premier lancement : `collect_prices.py` télécharge 10 archives
 annuelles complètes de la France (~10-35 Mo chacune, zip), traitées une par

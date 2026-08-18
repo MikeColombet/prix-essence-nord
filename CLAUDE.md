@@ -22,8 +22,9 @@ site that GitHub Actions regenerate and publish via GitHub Pages:
 - `build_site.py` — reads all of the above and (re)generates **two separate
   pages with distinct purposes**, plus the on-demand compressed data chunks
   (`stations/{dept}.json.gz`, `dept_avg/{dept}.json.gz`) they share:
-  - `index.html` — postal-code search only. No averages, no comparison —
-    that's deliberately not this page's job (see below).
+  - `index.html` — station search, two interchangeable modes (postal code /
+    France-wide map). No averages, no comparison — that's deliberately not
+    this page's job (see below).
   - `comparaison.html` — current national average (+ its evolution), and
     a département table (sorted by code, sticky header) showing every
     fuel's price with a cheaper/pricier-than-national indicator. Click a
@@ -135,6 +136,23 @@ price lines — no dept/region/national overlay (an earlier version
 superimposed those on a station's chart for comparison; removed as unwanted
 complexity, then the whole averages concept was later moved off this page
 entirely).
+
+**The France-wide map (`ensureAllStationsLoaded()` + `renderFranceMap()`) is
+not a separate data pipeline — it's `ensureStationsLoaded()` called for all
+95 départements in parallel (`Promise.all`), sharing the same
+`stationsCache`.** Deliberately not a single pre-built "all stations" chunk:
+that would duplicate data already split by département for the postal-code
+path. Cost is 95 small parallel HTTP requests instead of one big one,
+resolved in a few seconds even for ~12k markers — acceptable since it's
+lazy (only fires when the user switches to map mode) and memoized (only
+happens once per page load). Marker click reuses `selectStation()`
+unchanged, same as a postal-code result row. Default `map.zoom` is
+computed from the container's own aspect ratio at render time (`rect.width
+< rect.height ? 4.0 : 4.6`) — metropolitan France is wider than tall, so a
+fixed zoom framed correctly on desktop cropped badly on narrow mobile
+viewports (showing mostly neighboring countries above/below); `#franceMap`
+also gets a `70vh` height on narrow screens (vs. the fixed `620px`
+desktop default) to keep the aspect ratio itself closer to landscape.
 
 **`comparaison.html` embeds `NOMS_DEPARTEMENTS`, the *current* average per
 fuel at both levels (`deptLatest`, `nationalLatest`), and the *historical*

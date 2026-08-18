@@ -320,6 +320,19 @@ HTML_TEMPLATE = """<!doctype html>
     width: 200px; max-width: 100%;
   }
   .search-hint { font-size: 0.8rem; color: #6b6b70; margin-top: 6px; }
+  .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .mode-tab {
+    font-size: 0.9rem; padding: 8px 16px; border-radius: 8px; border: 1px solid #d8d8dc;
+    background: #fff; color: #444; cursor: pointer;
+  }
+  .mode-tab:hover { background: #f5f6f8; }
+  .mode-tab.active { background: #2980b9; color: #fff; border-color: #2980b9; }
+  .map-wrap {
+    background: #fff; border-radius: 10px; padding: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
+  }
+  #franceMap { width: 100%; height: 620px; }
+  @media (max-width: 600px) { #franceMap { height: 70vh; } }
   .layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
   .results-wrap {
     background: #fff; border-radius: 10px; padding: 12px;
@@ -369,10 +382,19 @@ HTML_TEMPLATE = """<!doctype html>
 
   <a class="nav-link" href="comparaison.html">Comparer les prix par departement / national &rarr;</a>
 
-  <div class="search-wrap">
+  <div class="mode-tabs">
+    <button type="button" class="mode-tab active" id="modeTabCp">Par code postal</button>
+    <button type="button" class="mode-tab" id="modeTabMap">Sur la carte</button>
+  </div>
+
+  <div class="search-wrap" id="cpSearchWrap">
     <label for="cpInput">Code postal :</label>
     <input id="cpInput" type="text" inputmode="numeric" autocomplete="off" placeholder="ex : 59700" maxlength="5">
     <div class="search-hint" id="searchHint">Tape au moins les 2 premiers chiffres d'un code postal pour voir les stations du departement.</div>
+  </div>
+
+  <div class="map-wrap" id="mapWrap" style="display:none">
+    <div id="franceMap"><p class="empty">Chargement des stations...</p></div>
   </div>
 
   <div class="layout">
@@ -435,9 +457,28 @@ async function ensureHistoryLoaded(sid, dept) {
   return data;
 }
 
+// Pour la carte, on a besoin de TOUTES les stations d'un coup plutot que
+// d'un seul departement : on reutilise simplement ensureStationsLoaded()
+// sur chaque departement en parallele (memes chunks, meme cache) plutot que
+// de generer un fichier France entiere supplementaire qui dupliquerait ces
+// memes donnees sur le disque.
+let allStationsPromise = null;
+function ensureAllStationsLoaded() {
+  if (!allStationsPromise) {
+    allStationsPromise = Promise.all(
+      Object.keys(NOMS_DEPARTEMENTS).map(d => ensureStationsLoaded(d).catch(() => []))
+    ).then(lists => lists.flat());
+  }
+  return allStationsPromise;
+}
+
 const cpInput = document.getElementById('cpInput');
 const resultsWrap = document.getElementById('resultsWrap');
 const detailsEl = document.getElementById('details');
+const modeTabCp = document.getElementById('modeTabCp');
+const modeTabMap = document.getElementById('modeTabMap');
+const cpSearchWrap = document.getElementById('cpSearchWrap');
+const mapWrap = document.getElementById('mapWrap');
 
 cpInput.addEventListener('input', () => {
   const digits = cpInput.value.replace(/\\D/g, '').slice(0, 5);
@@ -447,6 +488,80 @@ cpInput.addEventListener('input', () => {
 
 function resetResults(message) {
   resultsWrap.innerHTML = `<p class="empty">${message}</p>`;
+}
+
+let mapRendered = false;
+
+modeTabCp.addEventListener('click', () => {
+  modeTabCp.classList.add('active');
+  modeTabMap.classList.remove('active');
+  cpSearchWrap.style.display = 'block';
+  mapWrap.style.display = 'none';
+  resetResults("Tape au moins les 2 premiers chiffres d'un code postal.");
+});
+
+modeTabMap.addEventListener('click', async () => {
+  modeTabMap.classList.add('active');
+  modeTabCp.classList.remove('active');
+  cpSearchWrap.style.display = 'none';
+  mapWrap.style.display = 'block';
+  resultsWrap.innerHTML = '<p class="empty">Clique une station sur la carte pour voir ses prix et son evolution.</p>';
+
+  if (mapRendered) return;
+  let allStations;
+  try {
+    allStations = await ensureAllStationsLoaded();
+  } catch (e) {
+    document.getElementById('franceMap').innerHTML = `<p class="empty">${e.message}</p>`;
+    return;
+  }
+  await renderFranceMap(allStations);
+  mapRendered = true;
+});
+
+async function renderFranceMap(stations) {
+  const el = document.getElementById('franceMap');
+  const withCoords = stations.filter(s => s.latitude && s.longitude);
+  try {
+    if (typeof Plotly === 'undefined') throw new Error("Plotly ne s'est pas charge.");
+    // Plotly.newPlot ne vide pas le contenu HTML deja present dans le div
+    // cible (ex: le message "Chargement..."), il ajoute juste sa carte a
+    // cote : on vide explicitement avant de dessiner.
+    el.innerHTML = '';
+    // La France est plus large que haute : sur un conteneur etroit/portrait
+    // (mobile), un zoom fixe cadre trop serre en largeur et montre surtout
+    // les pays voisins en haut/bas. On zoome un peu moins dans ce cas pour
+    // que la France entiere reste visible par defaut.
+    const rect = el.getBoundingClientRect();
+    const zoom = rect.width < rect.height ? 4.0 : 4.6;
+    await Plotly.newPlot('franceMap', [{
+      type: 'scattermap',
+      mode: 'markers',
+      lat: withCoords.map(s => s.latitude),
+      lon: withCoords.map(s => s.longitude),
+      text: withCoords.map(s => `<b>${s.marque || s.adresse}</b><br>${s.adresse}<br>${s.cp} ${s.ville}`),
+      customdata: withCoords.map(s => s.id),
+      hoverinfo: 'text',
+      marker: { size: 6, color: '#2980b9', opacity: 0.7 },
+    }], {
+      map: {
+        style: 'open-street-map',
+        center: { lat: 46.6, lon: 2.5 },
+        zoom: zoom,
+      },
+      margin: { t: 0, r: 0, l: 0, b: 0 },
+    }, { responsive: true, displaylogo: false });
+
+    el.on('plotly_click', (data) => {
+      if (!data.points || !data.points.length) return;
+      const sid = data.points[0].customdata;
+      const station = withCoords.find(s => s.id === sid);
+      if (station) selectStation(station);
+    });
+  } catch (e) {
+    el.innerHTML = `<p class="empty">Carte indisponible : ${e.message}</p>`;
+    console.error(e);
+  }
 }
 
 async function onSearch(cp) {
