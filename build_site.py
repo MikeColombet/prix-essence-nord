@@ -328,7 +328,7 @@ HTML_TEMPLATE = """<!doctype html>
   .mode-tab:hover { background: #f5f6f8; }
   .mode-tab.active { background: #2980b9; color: #fff; border-color: #2980b9; }
   .map-wrap {
-    background: #fff; border-radius: 10px; padding: 12px;
+    background: #fff; border-radius: 10px; padding: 12px; max-width: 700px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
   }
   #franceMap { width: 100%; height: 420px; }
