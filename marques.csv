@@ -117,7 +117,7 @@ station_id,marque
 11130001,Intermarché
 11130002,Carrefour
 11140001,Dyneff
-11150001,Carrefour
+11150001,Carrefour Market
 11150002,Système U
 11160002,Independent
 11160003,Carrefour
@@ -230,7 +230,7 @@ station_id,marque
 1220001,Carrefour
 12210001,Casino
 12220001,Système U
-12230001,Total
+12230001,TotalEnergies
 12230003,Servifioul
 12230004,Total
 12240002,Intermarché
@@ -383,6 +383,7 @@ station_id,marque
 13120005,E.Leclerc
 13120008,TotalEnergies
 13120009,Relais de la Garde
+13120012,Carrefour
 13122001,Total
 13122002,Intermarché
 13124003,E.Leclerc
@@ -1188,6 +1189,7 @@ station_id,marque
 20213004,Vito
 20213005,Vito
 20213007,TotalEnergies
+20213008,TotalEnergies
 20215001,Vito
 20217001,Vito
 20217004,TotalEnergies
@@ -1227,6 +1229,7 @@ station_id,marque
 20260003,Vito
 20270001,Vito
 20270003,TotalEnergies
+20270004,TotalEnergies
 20290002,Total
 20290003,TotalEnergies
 20290008,Vito
@@ -1935,9 +1938,9 @@ station_id,marque
 27201001,E.Leclerc
 27210003,Intermarché
 27210006,Avia
-27210008,Carrefour
 27210009,TotalEnergies
 27210010,Avia
+27210013,Carrefour
 27220001,Carrefour Market
 27230004,Carrefour
 27230006,Total
@@ -2394,7 +2397,6 @@ station_id,marque
 31130004,Intermarché
 31130007,U
 31130008,Total Access
-31130011,TotalEnergies
 31140004,Carrefour Market
 31140005,Aire C
 31140006,Auchan
@@ -2563,6 +2565,7 @@ station_id,marque
 31800005,Auchan
 31800007,Total
 31800008,E.Leclerc
+31800009,TotalEnergies
 31800010,Netto
 31810002,Intermarché
 31810003,kai
@@ -2647,9 +2650,9 @@ station_id,marque
 3300004,Multi-Energies des Ancises
 33080001,Auchan
 3310002,Intermarché
-33110003,Monoprix
 33110007,TotalEnergies
 33110009,Avia
+33110010,Monoprix
 33112001,Système U
 33113002,Intermarché
 33114001,Super U
@@ -2828,7 +2831,7 @@ station_id,marque
 33700025,Auchan
 33710002,Carrefour
 33710003,Intermarché
-33720001,Station U
+33720001,Super U
 33720005,Elan
 33720006,Avia
 33720008,TotalEnergies
@@ -3267,7 +3270,7 @@ station_id,marque
 37150004,Total
 37160003,Intermarché
 37170006,Total Access
-37170007,Total Access
+37170007,TotalEnergies
 37172001,Auchan
 37190001,Total
 37190002,Carrefour Market
@@ -3403,6 +3406,7 @@ station_id,marque
 38260004,Total
 38260005,Casino
 38260007,Intermarché
+38260008,Elan
 38260009,Elan
 38270003,Super U
 38270005,Carrefour
@@ -4148,7 +4152,7 @@ station_id,marque
 44740002,Avia
 44750002,Intermarché
 44770001,Intermarché
-44780002,Spar
+44780002,E.Leclerc
 44800001,Auchan
 44800004,E.Leclerc
 44800007,Total
@@ -4247,7 +4251,6 @@ station_id,marque
 45480002,Carrefour Contact
 45480003,TotalEnergies
 45500001,Auchan
-45500006,Intermarché
 45500007,E.Leclerc
 45500008,TotalEnergies
 45500010,Carrefour Market
@@ -5341,7 +5344,7 @@ station_id,marque
 58230001,Rousseau Carburant
 58230002,Independent
 58240001,Avia
-58240003,Total Access
+58240003,TotalEnergies
 58260002,Intermarché
 58270001,Intermarché
 58290001,Bi1
@@ -5422,6 +5425,7 @@ station_id,marque
 59149002,Netto
 59150002,E.Leclerc
 59151002,Carrefour
+59151003,TotalEnergies
 59153001,Système U
 59155007,Total Access
 59155008,TotalEnergies
@@ -6686,7 +6690,7 @@ station_id,marque
 68180002,E. Leclerc
 68190003,Auchan
 68200004,Cora
-68200018,Total Access
+68200018,TotalEnergies
 68200019,Total Access
 68200020,Total
 68200025,Eni
@@ -7043,7 +7047,7 @@ station_id,marque
 71118001,Intermarché
 71120001,Avia
 71120002,Intermarché
-71130002,U
+71130002,Système U
 71130004,Intermarché
 71140001,bi1
 71140002,Eni
@@ -7906,7 +7910,6 @@ station_id,marque
 78000008,TotalEnergies
 7800001,TotalEnergies
 78000016,Esso
-78000019,TotalEnergies
 78000020,Total Access
 78000021,Esso
 7800003,Intermarché
@@ -8053,6 +8056,7 @@ station_id,marque
 79000012,Esso Express
 79000013,Total Access
 79000014,E.Leclerc
+79004001,E.Leclerc
 79025002,E.Leclerc
 79100001,Système U
 79100003,E.Leclerc
@@ -8066,6 +8070,7 @@ station_id,marque
 79120002,Intermarché
 79130001,Système U
 79140001,Système U
+79140002,TotalEnergies
 79150002,Carrefour
 79160001,Système U
 79160002,E.Leclerc
@@ -9027,7 +9032,7 @@ station_id,marque
 88550001,Super U
 88560003,Carrefour Contact
 88560004,Avia XPress
-88580001,Total
+88580001,TotalEnergies
 88600001,Total
 88600002,Independent
 88600003,Intermarché
